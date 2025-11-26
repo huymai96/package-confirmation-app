@@ -127,7 +127,7 @@ export default function Home() {
               <Package className="w-10 h-10 text-white" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-white">Package Tracker</h1>
+              <h1 className="text-3xl font-bold text-white">Promos Ink Supply Chain</h1>
               <p className="text-indigo-200">Inbound & Outbound Shipment Lookup</p>
             </div>
           </div>
