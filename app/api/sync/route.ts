@@ -8,7 +8,10 @@ import {
 } from '@/app/lib/cloud-storage';
 
 // Secret key to protect the sync endpoint
-const SYNC_SECRET = process.env.SYNC_SECRET || 'your-sync-secret-key';
+const SYNC_SECRET = process.env.SYNC_SECRET || 'promos-sync-2024';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // Allow up to 60 seconds for large syncs
 
 export async function POST(request: Request) {
   try {
@@ -43,6 +46,8 @@ export async function POST(request: Request) {
       // Full sync - inbound, outbound, and stats
       const { inbound, outbound } = data;
       
+      console.log(`Starting full sync: ${inbound?.length || 0} inbound, ${outbound?.length || 0} outbound`);
+      
       const [inboundResult, outboundResult] = await Promise.all([
         storeInboundScans(inbound || []),
         storeOutboundShipments(outbound || [])
@@ -53,10 +58,13 @@ export async function POST(request: Request) {
         outbound?.length || 0
       );
       
+      console.log('Sync complete:', { inboundResult, outboundResult });
+      
       return NextResponse.json({
         success: true,
         inbound: inboundResult,
-        outbound: outboundResult
+        outbound: outboundResult,
+        timestamp: new Date().toISOString()
       });
     }
     
@@ -67,3 +75,11 @@ export async function POST(request: Request) {
   }
 }
 
+// Health check
+export async function GET() {
+  return NextResponse.json({ 
+    status: 'ok', 
+    message: 'Sync endpoint ready',
+    timestamp: new Date().toISOString()
+  });
+}

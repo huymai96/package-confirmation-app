@@ -1,11 +1,10 @@
-import { kv } from '@vercel/kv';
+import { put, list, del } from '@vercel/blob';
 
-// Keys for storing data in Vercel KV
-const KEYS = {
-  INBOUND_SCANS: 'inbound_scans',
-  OUTBOUND_SHIPMENTS: 'outbound_shipments',
-  STATS: 'stats',
-  LAST_SYNC: 'last_sync'
+// Blob file names
+const BLOB_FILES = {
+  INBOUND: 'inbound-scans.json',
+  OUTBOUND: 'outbound-shipments.json',
+  STATS: 'stats.json'
 };
 
 export interface InboundScan {
@@ -56,10 +55,61 @@ export interface PackageResult {
   message: string;
 }
 
+// Helper to get blob URL by name
+async function getBlobUrl(filename: string): Promise<string | null> {
+  try {
+    const { blobs } = await list();
+    const blob = blobs.find(b => b.pathname === filename);
+    return blob?.url || null;
+  } catch (error) {
+    console.error('Error listing blobs:', error);
+    return null;
+  }
+}
+
+// Helper to read JSON from blob
+async function readBlobJson<T>(filename: string): Promise<T | null> {
+  try {
+    const url = await getBlobUrl(filename);
+    if (!url) return null;
+    
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    
+    return await response.json() as T;
+  } catch (error) {
+    console.error(`Error reading blob ${filename}:`, error);
+    return null;
+  }
+}
+
+// Helper to write JSON to blob
+async function writeBlobJson(filename: string, data: unknown): Promise<boolean> {
+  try {
+    // Delete existing blob first
+    const existingUrl = await getBlobUrl(filename);
+    if (existingUrl) {
+      await del(existingUrl);
+    }
+    
+    // Write new blob
+    const json = JSON.stringify(data);
+    await put(filename, json, {
+      access: 'public',
+      contentType: 'application/json'
+    });
+    
+    return true;
+  } catch (error) {
+    console.error(`Error writing blob ${filename}:`, error);
+    return false;
+  }
+}
+
 // Store inbound scans
 export async function storeInboundScans(scans: InboundScan[]) {
   try {
-    // Store as a hash map for quick lookup
+    // Create lookup map
     const scanMap: Record<string, InboundScan> = {};
     for (const scan of scans) {
       if (scan.tracking) {
@@ -70,13 +120,15 @@ export async function storeInboundScans(scans: InboundScan[]) {
       }
     }
     
-    await kv.set(KEYS.INBOUND_SCANS, scanMap);
+    const data = {
+      map: scanMap,
+      recent: scans.slice(-50).reverse(),
+      count: scans.length,
+      lastUpdated: new Date().toISOString()
+    };
     
-    // Store recent scans list (last 50)
-    const recent = scans.slice(-50).reverse();
-    await kv.set('recent_inbound', recent);
-    
-    return { success: true, count: scans.length };
+    const success = await writeBlobJson(BLOB_FILES.INBOUND, data);
+    return { success, count: scans.length };
   } catch (error) {
     console.error('Error storing inbound scans:', error);
     return { success: false, error: String(error) };
@@ -93,13 +145,15 @@ export async function storeOutboundShipments(shipments: OutboundShipment[]) {
       }
     }
     
-    await kv.set(KEYS.OUTBOUND_SHIPMENTS, shipmentMap);
+    const data = {
+      map: shipmentMap,
+      recent: shipments.slice(-50).reverse(),
+      count: shipments.length,
+      lastUpdated: new Date().toISOString()
+    };
     
-    // Store recent shipments (last 50)
-    const recent = shipments.slice(-50).reverse();
-    await kv.set('recent_outbound', recent);
-    
-    return { success: true, count: shipments.length };
+    const success = await writeBlobJson(BLOB_FILES.OUTBOUND, data);
+    return { success, count: shipments.length };
   } catch (error) {
     console.error('Error storing outbound shipments:', error);
     return { success: false, error: String(error) };
@@ -108,15 +162,18 @@ export async function storeOutboundShipments(shipments: OutboundShipment[]) {
 
 // Update stats
 export async function updateStats(inboundCount: number, outboundCount: number) {
-  await kv.set(KEYS.STATS, { inboundTotal: inboundCount, outboundTotal: outboundCount });
-  await kv.set(KEYS.LAST_SYNC, new Date().toISOString());
+  const data = {
+    inboundTotal: inboundCount,
+    outboundTotal: outboundCount,
+    lastSync: new Date().toISOString()
+  };
+  await writeBlobJson(BLOB_FILES.STATS, data);
 }
 
 // Get stats
 export async function getStats() {
-  const stats = await kv.get<{ inboundTotal: number; outboundTotal: number }>(KEYS.STATS);
-  const lastSync = await kv.get<string>(KEYS.LAST_SYNC);
-  return { ...stats, lastSync };
+  const stats = await readBlobJson<{ inboundTotal: number; outboundTotal: number; lastSync: string }>(BLOB_FILES.STATS);
+  return stats || { inboundTotal: 0, outboundTotal: 0, lastSync: null };
 }
 
 // Search for a package
@@ -132,40 +189,39 @@ export async function lookupPackage(query: string): Promise<PackageResult> {
 
   const cleanQuery = query.trim().toLowerCase();
   
-  // Get data from KV
-  const [inboundMap, outboundMap] = await Promise.all([
-    kv.get<Record<string, InboundScan>>(KEYS.INBOUND_SCANS),
-    kv.get<Record<string, OutboundShipment>>(KEYS.OUTBOUND_SHIPMENTS)
+  // Get data from Blob storage
+  const [inboundData, outboundData] = await Promise.all([
+    readBlobJson<{ map: Record<string, InboundScan>; recent: InboundScan[] }>(BLOB_FILES.INBOUND),
+    readBlobJson<{ map: Record<string, OutboundShipment>; recent: OutboundShipment[] }>(BLOB_FILES.OUTBOUND)
   ]);
+  
+  const inboundMap = inboundData?.map || {};
+  const outboundMap = outboundData?.map || {};
   
   // Search inbound
   let inboundResult: InboundScan | null = null;
-  if (inboundMap) {
-    // Direct match
-    inboundResult = inboundMap[cleanQuery] || inboundMap[`po:${cleanQuery}`] || null;
-    
-    // Partial match if no direct match
-    if (!inboundResult) {
-      for (const [key, scan] of Object.entries(inboundMap)) {
-        if (key.includes(cleanQuery) || scan.tracking?.toLowerCase().includes(cleanQuery) || scan.po?.toLowerCase().includes(cleanQuery)) {
-          inboundResult = scan;
-          break;
-        }
+  // Direct match
+  inboundResult = inboundMap[cleanQuery] || inboundMap[`po:${cleanQuery}`] || null;
+  
+  // Partial match if no direct match
+  if (!inboundResult) {
+    for (const [key, scan] of Object.entries(inboundMap)) {
+      if (key.includes(cleanQuery) || scan.tracking?.toLowerCase().includes(cleanQuery) || scan.po?.toLowerCase().includes(cleanQuery)) {
+        inboundResult = scan;
+        break;
       }
     }
   }
   
   // Search outbound
   let outboundResult: OutboundShipment | null = null;
-  if (outboundMap) {
-    outboundResult = outboundMap[cleanQuery] || null;
-    
-    if (!outboundResult) {
-      for (const [key, ship] of Object.entries(outboundMap)) {
-        if (key.includes(cleanQuery) || ship.tracking?.toLowerCase().includes(cleanQuery) || ship.reference?.toLowerCase().includes(cleanQuery)) {
-          outboundResult = ship;
-          break;
-        }
+  outboundResult = outboundMap[cleanQuery] || null;
+  
+  if (!outboundResult) {
+    for (const [key, ship] of Object.entries(outboundMap)) {
+      if (key.includes(cleanQuery) || ship.tracking?.toLowerCase().includes(cleanQuery) || ship.reference?.toLowerCase().includes(cleanQuery)) {
+        outboundResult = ship;
+        break;
       }
     }
   }
@@ -229,11 +285,12 @@ export async function lookupPackage(query: string): Promise<PackageResult> {
 
 // Get recent inbound scans
 export async function getRecentInbound() {
-  return await kv.get<InboundScan[]>('recent_inbound') || [];
+  const data = await readBlobJson<{ recent: InboundScan[] }>(BLOB_FILES.INBOUND);
+  return data?.recent || [];
 }
 
 // Get recent outbound shipments
 export async function getRecentOutbound() {
-  return await kv.get<OutboundShipment[]>('recent_outbound') || [];
+  const data = await readBlobJson<{ recent: OutboundShipment[] }>(BLOB_FILES.OUTBOUND);
+  return data?.recent || [];
 }
-
