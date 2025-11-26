@@ -1,33 +1,38 @@
 import { NextResponse } from 'next/server';
-import type { ConfirmationData } from '@/app/types';
-import { getPackages, setPackages } from '@/app/lib/storage';
+import { saveConfirmation, readScanLog } from '@/app/lib/csv-reader';
 
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = await params;
-    const confirmation: ConfirmationData = await request.json();
+    const { id } = params;
+    const { confirmedBy, notes } = await request.json();
     
-    const packages = getPackages();
-    const packageIndex = packages.findIndex(p => p.id === id);
-    
-    if (packageIndex === -1) {
-      return NextResponse.json({ error: 'Package not found' }, { status: 404 });
+    if (!confirmedBy) {
+      return NextResponse.json({ error: 'confirmedBy is required' }, { status: 400 });
     }
     
-    packages[packageIndex] = {
-      ...packages[packageIndex],
-      status: 'received',
-      receivedDate: confirmation.receivedDate,
-      receivedBy: confirmation.receivedBy,
-      notes: confirmation.notes,
-    };
+    // Decode the ID (it might be URL encoded)
+    const decodedId = decodeURIComponent(id);
     
-    setPackages(packages);
-    return NextResponse.json(packages[packageIndex]);
+    const success = saveConfirmation(decodedId, confirmedBy, notes);
+    
+    if (!success) {
+      return NextResponse.json({ error: 'Failed to save confirmation' }, { status: 500 });
+    }
+    
+    // Return the updated record
+    const records = readScanLog();
+    const updatedRecord = records.find(r => r.id === decodedId);
+    
+    if (updatedRecord) {
+      return NextResponse.json(updatedRecord);
+    }
+    
+    return NextResponse.json({ success: true, id: decodedId });
   } catch (error) {
+    console.error('Error confirming package:', error);
     return NextResponse.json({ error: 'Failed to confirm package' }, { status: 500 });
   }
 }

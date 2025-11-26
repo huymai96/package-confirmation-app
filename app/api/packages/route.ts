@@ -1,26 +1,22 @@
 import { NextResponse } from 'next/server';
-import type { Package } from '@/app/types';
-import { getPackages, setPackages } from '@/app/lib/storage';
+import { readScanLog, getStats } from '@/app/lib/csv-reader';
 
-export async function GET() {
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: Request) {
   try {
-    const packages = getPackages();
-    return NextResponse.json(packages);
+    const { searchParams } = new URL(request.url);
+    const statsOnly = searchParams.get('stats') === 'true';
+    
+    if (statsOnly) {
+      const stats = getStats();
+      return NextResponse.json(stats);
+    }
+    
+    const records = readScanLog();
+    return NextResponse.json(records);
   } catch (error) {
+    console.error('Error in GET /api/packages:', error);
     return NextResponse.json({ error: 'Failed to fetch packages' }, { status: 500 });
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    const newPackage: Package = await request.json();
-    const packages = getPackages();
-    const maxId = packages.length > 0 ? Math.max(...packages.map(p => parseInt(p.id))) : 0;
-    newPackage.id = (maxId + 1).toString();
-    packages.push(newPackage);
-    setPackages(packages);
-    return NextResponse.json(newPackage, { status: 201 });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to create package' }, { status: 500 });
   }
 }

@@ -1,19 +1,25 @@
-export interface Package {
+export interface ScanRecord {
   id: string;
-  orderNumber: string;
-  supplier: string;
-  description: string;
-  expectedDate: string;
-  receivedDate?: string;
-  receivedBy?: string;
-  status: 'pending' | 'received' | 'overdue';
+  timestamp: string;
+  tracking: string;
+  poNumber: string;
+  customer: string;
+  dueDate: string;
+  status: string;
+  confirmed: boolean;
+  confirmedBy?: string;
+  confirmedAt?: string;
   notes?: string;
+}
+
+export interface Stats {
+  total: number;
+  confirmed: number;
+  pending: number;
+  todayScans: number;
 }
 
 export interface ConfirmationData {
-  packageId: string;
-  receivedBy: string;
-  receivedDate: string;
+  confirmedBy: string;
   notes?: string;
 }
-
