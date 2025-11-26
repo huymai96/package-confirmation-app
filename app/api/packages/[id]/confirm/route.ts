@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { ConfirmationData } from '@/app/types';
-import { getPackages, setPackages } from '../../route';
+import { getPackages, setPackages } from '@/app/lib/storage';
 
 export async function POST(
   request: Request,
@@ -31,4 +31,3 @@ export async function POST(
     return NextResponse.json({ error: 'Failed to confirm package' }, { status: 500 });
   }
 }
-
