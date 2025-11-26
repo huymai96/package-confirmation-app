@@ -1,34 +1,11 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
 import type { Package } from '@/app/types';
 
-const DATA_FILE = path.join(process.cwd(), 'data', 'packages.json');
-
-function ensureDataDir() {
-  const dataDir = path.dirname(DATA_FILE);
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-}
-
-function readPackages(): Package[] {
-  ensureDataDir();
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const data = fs.readFileSync(DATA_FILE, 'utf-8');
-      return JSON.parse(data);
-    }
-  } catch (error) {
-    console.error('Error reading packages:', error);
-  }
-  return getDefaultPackages();
-}
-
-function writePackages(packages: Package[]) {
-  ensureDataDir();
-  fs.writeFileSync(DATA_FILE, JSON.stringify(packages, null, 2));
-}
+// In-memory storage (works on Vercel serverless)
+// For production, use Vercel KV, Postgres, or another database
+const globalForPackages = globalThis as unknown as {
+  packages: Package[] | undefined;
+};
 
 function getDefaultPackages(): Package[] {
   const today = new Date();
@@ -47,9 +24,22 @@ function getDefaultPackages(): Package[] {
   ];
 }
 
+// Initialize packages if not already set
+if (!globalForPackages.packages) {
+  globalForPackages.packages = getDefaultPackages();
+}
+
+export function getPackages(): Package[] {
+  return globalForPackages.packages || getDefaultPackages();
+}
+
+export function setPackages(packages: Package[]) {
+  globalForPackages.packages = packages;
+}
+
 export async function GET() {
   try {
-    const packages = readPackages();
+    const packages = getPackages();
     return NextResponse.json(packages);
   } catch (error) {
     return NextResponse.json({ error: 'Failed to fetch packages' }, { status: 500 });
@@ -59,11 +49,11 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const newPackage: Package = await request.json();
-    const packages = readPackages();
+    const packages = getPackages();
     const maxId = packages.length > 0 ? Math.max(...packages.map(p => parseInt(p.id))) : 0;
     newPackage.id = (maxId + 1).toString();
     packages.push(newPackage);
-    writePackages(packages);
+    setPackages(packages);
     return NextResponse.json(newPackage, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: 'Failed to create package' }, { status: 500 });
