@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 // Check if running in cloud mode (Vercel) or local mode
-const IS_CLOUD = process.env.KV_REST_API_URL ? true : false;
+const IS_CLOUD = process.env.BLOB_READ_WRITE_TOKEN ? true : false;
 
 // Dynamic imports based on environment
 async function getLocalFunctions() {
