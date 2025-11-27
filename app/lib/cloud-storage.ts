@@ -4,7 +4,8 @@ import { put, list, del } from '@vercel/blob';
 const BLOB_FILES = {
   INBOUND: 'inbound-scans.json',
   OUTBOUND: 'outbound-shipments.json',
-  STATS: 'stats.json'
+  STATS: 'stats.json',
+  QUANTUM_VIEW: 'quantum-view-events.json'
 };
 
 export interface InboundScan {
@@ -27,6 +28,37 @@ export interface OutboundShipment {
   reference: string;
   location: string;
   station: string;
+}
+
+export interface QVShipment {
+  trackingNumber: string;
+  shipperNumber: string;
+  shipDate: string;
+  scheduledDeliveryDate?: string;
+  service: string;
+  weight: string;
+  origin: {
+    city: string;
+    state: string;
+    country: string;
+    postalCode: string;
+  };
+  destination: {
+    city: string;
+    state: string;
+    country: string;
+    postalCode: string;
+    companyName?: string;
+    attentionName?: string;
+  };
+  referenceNumbers?: string[];
+  currentStatus?: string;
+  lastActivity?: {
+    date: string;
+    time: string;
+    location: string;
+    description: string;
+  };
 }
 
 export interface PackageResult {
@@ -189,14 +221,16 @@ export async function lookupPackage(query: string): Promise<PackageResult> {
 
   const cleanQuery = query.trim().toLowerCase();
   
-  // Get data from Blob storage
-  const [inboundData, outboundData] = await Promise.all([
+  // Get data from Blob storage (including Quantum View)
+  const [inboundData, outboundData, qvData] = await Promise.all([
     readBlobJson<{ map: Record<string, InboundScan>; recent: InboundScan[] }>(BLOB_FILES.INBOUND),
-    readBlobJson<{ map: Record<string, OutboundShipment>; recent: OutboundShipment[] }>(BLOB_FILES.OUTBOUND)
+    readBlobJson<{ map: Record<string, OutboundShipment>; recent: OutboundShipment[] }>(BLOB_FILES.OUTBOUND),
+    readBlobJson<{ shipments: Record<string, QVShipment> }>(BLOB_FILES.QUANTUM_VIEW)
   ]);
   
   const inboundMap = inboundData?.map || {};
   const outboundMap = outboundData?.map || {};
+  const qvMap = qvData?.shipments || {};
   
   // Search inbound
   let inboundResult: InboundScan | null = null;
@@ -226,17 +260,33 @@ export async function lookupPackage(query: string): Promise<PackageResult> {
     }
   }
   
+  // Search Quantum View data
+  let qvResult: QVShipment | null = null;
+  qvResult = qvMap[cleanQuery] || null;
+  
+  if (!qvResult) {
+    for (const [key, ship] of Object.entries(qvMap)) {
+      if (key.includes(cleanQuery) || 
+          ship.trackingNumber?.toLowerCase().includes(cleanQuery) ||
+          ship.referenceNumbers?.some(ref => ref.toLowerCase().includes(cleanQuery))) {
+        qvResult = ship;
+        break;
+      }
+    }
+  }
+  
   // Build result
   const hasInbound = !!inboundResult;
   const hasOutbound = !!outboundResult;
+  const hasQV = !!qvResult;
   
   let type: 'inbound' | 'outbound' | 'both' | 'none' = 'none';
   if (hasInbound && hasOutbound) type = 'both';
   else if (hasInbound) type = 'inbound';
-  else if (hasOutbound) type = 'outbound';
+  else if (hasOutbound || hasQV) type = 'outbound';
   
   const result: PackageResult = {
-    found: hasInbound || hasOutbound,
+    found: hasInbound || hasOutbound || hasQV,
     type,
     tracking: query,
     message: ''
@@ -269,13 +319,49 @@ export async function lookupPackage(query: string): Promise<PackageResult> {
     result.tracking = outboundResult.tracking || result.tracking;
   }
   
+  // Add Quantum View data if available
+  if (qvResult) {
+    // If no outbound result, create one from QV data
+    if (!result.outbound) {
+      result.outbound = {
+        found: true,
+        recipient: qvResult.destination.companyName || qvResult.destination.attentionName,
+        city: qvResult.destination.city,
+        state: qvResult.destination.state,
+        zip: qvResult.destination.postalCode,
+        service: qvResult.service,
+        reference: qvResult.referenceNumbers?.join(', '),
+        location: 'Quantum View',
+        station: qvResult.shipperNumber
+      };
+    }
+    
+    // Add QV-specific data to result
+    (result as PackageResult & { quantumView?: object }).quantumView = {
+      trackingNumber: qvResult.trackingNumber,
+      shipDate: qvResult.shipDate,
+      scheduledDelivery: qvResult.scheduledDeliveryDate,
+      status: qvResult.currentStatus,
+      weight: qvResult.weight,
+      origin: qvResult.origin,
+      destination: qvResult.destination,
+      lastActivity: qvResult.lastActivity
+    };
+    
+    result.tracking = qvResult.trackingNumber || result.tracking;
+  }
+  
   // Generate message
   if (type === 'both') {
     result.message = '📥📤 Found in BOTH Inbound & Outbound';
   } else if (type === 'inbound') {
     result.message = `📥 INBOUND - Received on ${inboundResult?.timestamp}`;
   } else if (type === 'outbound') {
-    result.message = `📤 OUTBOUND - Shipped from ${outboundResult?.location} (${outboundResult?.station})`;
+    if (qvResult?.currentStatus) {
+      result.message = `📤 OUTBOUND - ${qvResult.currentStatus}`;
+    } else {
+      result.message = `📤 OUTBOUND - Shipped from ${outboundResult?.location} (${outboundResult?.station})`;
+    }
   } else {
     result.message = `❌ NOT FOUND - No record of "${query}"`;
   }
