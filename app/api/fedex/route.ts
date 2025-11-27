@@ -43,19 +43,52 @@ export async function GET(request: Request) {
         }, { status: 400 });
       }
 
-      const result = await trackPackage(tracking);
-      
-      if (!result) {
+      // Call FedEx API directly for debugging
+      const tokenResponse = await fetch('https://apis.fedex.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: process.env.FEDEX_API_KEY || '',
+          client_secret: process.env.FEDEX_SECRET_KEY || ''
+        })
+      });
+
+      if (!tokenResponse.ok) {
+        const tokenError = await tokenResponse.text();
         return NextResponse.json({
-          found: false,
-          tracking,
-          message: 'Package not found or tracking unavailable'
-        });
+          error: 'OAuth failed',
+          status: tokenResponse.status,
+          details: tokenError
+        }, { status: 500 });
       }
 
+      const tokenData = await tokenResponse.json();
+      
+      // Now track the package
+      const trackResponse = await fetch('https://apis.fedex.com/track/v1/trackingnumbers', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${tokenData.access_token}`,
+          'Content-Type': 'application/json',
+          'X-locale': 'en_US'
+        },
+        body: JSON.stringify({
+          includeDetailedScans: true,
+          trackingInfo: [{
+            trackingNumberInfo: { trackingNumber: tracking }
+          }]
+        })
+      });
+
+      const trackData = await trackResponse.json();
+      
+      // Return full response for debugging
       return NextResponse.json({
-        found: true,
-        ...result
+        found: trackResponse.ok,
+        tracking,
+        httpStatus: trackResponse.status,
+        response: trackData
       });
     }
 

@@ -31,7 +31,7 @@ interface OutboundInfo {
   carrier?: string;
 }
 
-interface UPSEvent {
+interface TrackingEvent {
   date: string;
   time: string;
   location: string;
@@ -48,17 +48,32 @@ interface UPSLiveData {
   exceptionReason?: string;
   weight?: string;
   service?: string;
-  events: UPSEvent[];
+  events: TrackingEvent[];
+}
+
+interface FedExLiveData {
+  status: string;
+  deliveredAt?: string;
+  estimatedDelivery?: string;
+  location?: string;
+  isException: boolean;
+  exceptionReason?: string;
+  weight?: string;
+  service?: string;
+  signedBy?: string;
+  events: TrackingEvent[];
 }
 
 interface PackageResult {
   found: boolean;
   type: 'inbound' | 'outbound' | 'both' | 'none';
   tracking: string;
+  carrier?: 'UPS' | 'FedEx';
   inbound?: InboundInfo;
   outbound?: OutboundInfo;
   message: string;
   upsLive?: UPSLiveData;
+  fedexLive?: FedExLiveData;
   quantumView?: {
     trackingNumber: string;
     status: string;
@@ -427,9 +442,14 @@ export default function Home() {
               {result.upsLive && (
                 <div className={`rounded-xl p-4 ${result.upsLive.isException ? 'bg-red-100/50' : 'bg-amber-100/50'}`}>
                   <h3 className={`font-bold mb-2 flex items-center gap-2 ${result.upsLive.isException ? 'text-red-800' : 'text-amber-800'}`}>
-                    <Truck className="w-5 h-5" /> UPS Live
+                    <Truck className="w-5 h-5" /> 
+                    <span className="bg-amber-700 text-white text-xs px-2 py-0.5 rounded">UPS</span>
+                    Live Tracking
                     {result.upsLive.isException && (
-                      <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full">EXCEPTION</span>
+                      <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full ml-1">EXCEPTION</span>
+                    )}
+                    {result.upsLive.status?.toLowerCase().includes('delivered') && (
+                      <span className="text-xs bg-green-500 text-white px-2 py-0.5 rounded-full ml-1">DELIVERED</span>
                     )}
                   </h3>
                   <div className="grid grid-cols-2 gap-3 text-sm">
@@ -443,6 +463,24 @@ export default function Home() {
                         <p className="font-bold text-gray-800">{result.upsLive.location}</p>
                       </div>
                     )}
+                    {result.upsLive.service && (
+                      <div>
+                        <p className="text-amber-600 text-xs">Service</p>
+                        <p className="font-bold text-gray-800">{result.upsLive.service}</p>
+                      </div>
+                    )}
+                    {result.upsLive.estimatedDelivery && (
+                      <div>
+                        <p className="text-amber-600 text-xs">Est. Delivery</p>
+                        <p className="font-bold text-gray-800">{result.upsLive.estimatedDelivery}</p>
+                      </div>
+                    )}
+                    {result.upsLive.deliveredAt && (
+                      <div>
+                        <p className="text-green-600 text-xs">Delivered</p>
+                        <p className="font-bold text-green-700">{result.upsLive.deliveredAt}</p>
+                      </div>
+                    )}
                   </div>
                   {result.upsLive.events && result.upsLive.events.length > 0 && (
                     <div className="border-t border-amber-200 pt-2 mt-2">
@@ -450,6 +488,77 @@ export default function Home() {
                       {result.upsLive.events.slice(0, 3).map((event, idx) => (
                         <div key={idx} className="text-xs text-gray-700">
                           • {event.description} - {event.location}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* FedEx Live Tracking */}
+              {result.fedexLive && (
+                <div className={`rounded-xl p-4 ${result.fedexLive.isException ? 'bg-red-100/50' : 'bg-purple-100/50'}`}>
+                  <h3 className={`font-bold mb-2 flex items-center gap-2 ${result.fedexLive.isException ? 'text-red-800' : 'text-purple-800'}`}>
+                    <Truck className="w-5 h-5" /> 
+                    <span className="bg-purple-600 text-white text-xs px-2 py-0.5 rounded">FedEx</span>
+                    Live Tracking
+                    {result.fedexLive.isException && (
+                      <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full ml-1">EXCEPTION</span>
+                    )}
+                    {result.fedexLive.status?.toLowerCase().includes('delivered') && (
+                      <span className="text-xs bg-green-500 text-white px-2 py-0.5 rounded-full ml-1">DELIVERED</span>
+                    )}
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-purple-600 text-xs">Status</p>
+                      <p className="font-bold text-gray-800">{result.fedexLive.status}</p>
+                    </div>
+                    {result.fedexLive.location && (
+                      <div>
+                        <p className="text-purple-600 text-xs">Last Location</p>
+                        <p className="font-bold text-gray-800">{result.fedexLive.location}</p>
+                      </div>
+                    )}
+                    {result.fedexLive.service && (
+                      <div>
+                        <p className="text-purple-600 text-xs">Service</p>
+                        <p className="font-bold text-gray-800">{result.fedexLive.service}</p>
+                      </div>
+                    )}
+                    {result.fedexLive.weight && (
+                      <div>
+                        <p className="text-purple-600 text-xs">Weight</p>
+                        <p className="font-bold text-gray-800">{result.fedexLive.weight} lbs</p>
+                      </div>
+                    )}
+                    {result.fedexLive.estimatedDelivery && !result.fedexLive.deliveredAt && (
+                      <div>
+                        <p className="text-purple-600 text-xs">Est. Delivery</p>
+                        <p className="font-bold text-gray-800">{result.fedexLive.estimatedDelivery}</p>
+                      </div>
+                    )}
+                    {result.fedexLive.deliveredAt && (
+                      <div>
+                        <p className="text-green-600 text-xs">Delivered</p>
+                        <p className="font-bold text-green-700">{result.fedexLive.deliveredAt}</p>
+                      </div>
+                    )}
+                    {result.fedexLive.signedBy && (
+                      <div>
+                        <p className="text-green-600 text-xs">Signed By</p>
+                        <p className="font-bold text-green-700">{result.fedexLive.signedBy}</p>
+                      </div>
+                    )}
+                  </div>
+                  {result.fedexLive.events && result.fedexLive.events.length > 0 && (
+                    <div className="border-t border-purple-200 pt-2 mt-2">
+                      <p className="text-purple-700 text-xs font-semibold mb-1">Recent Activity</p>
+                      {result.fedexLive.events.slice(0, 4).map((event, idx) => (
+                        <div key={idx} className="text-xs text-gray-700 flex items-start gap-1">
+                          <span className="text-purple-400">•</span>
+                          <span>{event.date} {event.time?.substring(0,5)} - {event.description}</span>
+                          {event.location && <span className="text-gray-500">({event.location})</span>}
                         </div>
                       ))}
                     </div>

@@ -2,8 +2,9 @@
  * FedEx Integration
  * 
  * Provides:
- * - Real-time package tracking
- * - FedEx Insight visibility (inbound/outbound)
+ * - Real-time package tracking via FedEx Track API
+ * - FedEx Advanced Integrated Visibility (webhooks)
+ * - Multi-location support
  */
 
 // FedEx API Configuration
