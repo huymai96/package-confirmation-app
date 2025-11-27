@@ -7,7 +7,7 @@ function toCSV(data: any[], columns?: string[]): string {
   if (!data || data.length === 0) return '';
   
   // Get all unique keys if columns not specified
-  const headers = columns || [...new Set(data.flatMap(obj => Object.keys(obj)))];
+  const headers = columns || Array.from(new Set(data.flatMap(obj => Object.keys(obj))));
   
   // Create header row
   const headerRow = headers.map(h => `"${h}"`).join(',');
