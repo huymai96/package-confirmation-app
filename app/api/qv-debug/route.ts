@@ -58,54 +58,67 @@ export async function GET() {
         `${accountNumber}_OUTBOUND`
       ];
 
-      for (const subName of subscriptionNames) {
-        try {
-          const qvResponse = await fetch(
-            `${UPS_CONFIG.baseUrl}/api/quantumview/v1/response`,
-            {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${tokenData.access_token}`,
-                'Content-Type': 'application/json',
-                'transId': `qv-debug-${Date.now()}`,
-                'transactionSrc': 'PromoInkSupplyChain'
-              },
-              body: JSON.stringify({
-                QuantumViewRequest: {
-                  Request: {
-                    TransactionReference: {
-                      CustomerContext: 'Debug'
-                    }
-                  },
-                  SubscriptionRequest: {
-                    Name: subName,
-                    DateTimeRange: {
-                      BeginDateTime: getDateOffset(-7),
-                      EndDateTime: getDateOffset(0)
-                    }
+      // Only test first subscription name format for each account
+      const subName = accountNumber;
+      
+      try {
+        const qvResponse = await fetch(
+          `${UPS_CONFIG.baseUrl}/api/quantumview/v1/response`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${tokenData.access_token}`,
+              'Content-Type': 'application/json',
+              'transId': `qv-debug-${Date.now()}`,
+              'transactionSrc': 'PromoInkSupplyChain'
+            },
+            body: JSON.stringify({
+              QuantumViewRequest: {
+                Request: {
+                  TransactionReference: {
+                    CustomerContext: 'Debug'
+                  }
+                },
+                SubscriptionRequest: {
+                  Name: subName,
+                  DateTimeRange: {
+                    BeginDateTime: getDateOffset(-7),
+                    EndDateTime: getDateOffset(0)
                   }
                 }
-              })
-            }
-          );
+              }
+            })
+          }
+        );
 
-          const qvData = await qvResponse.json();
-          
-          results.push({
-            accountNumber,
-            subscriptionName: subName,
-            httpStatus: qvResponse.status,
-            hasData: !!qvData.QuantumViewResponse?.QuantumViewEvents,
-            response: qvData
-          });
-
-        } catch (err) {
-          results.push({
-            accountNumber,
-            subscriptionName: subName,
-            error: String(err)
-          });
+        // Get raw text first
+        const rawText = await qvResponse.text();
+        
+        let parsed = null;
+        try {
+          if (rawText && rawText.trim()) {
+            parsed = JSON.parse(rawText);
+          }
+        } catch (e) {
+          // Keep raw text if can't parse
         }
+        
+        results.push({
+          accountNumber,
+          subscriptionName: subName,
+          httpStatus: qvResponse.status,
+          headers: Object.fromEntries(qvResponse.headers.entries()),
+          rawResponseLength: rawText?.length || 0,
+          rawResponse: rawText?.substring(0, 2000) || '(empty)',
+          parsed
+        });
+
+      } catch (err) {
+        results.push({
+          accountNumber,
+          subscriptionName: subName,
+          error: String(err)
+        });
       }
     }
 
