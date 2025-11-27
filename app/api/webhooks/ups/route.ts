@@ -298,7 +298,6 @@ export async function POST(request: Request) {
     
     // Return success to UPS
     return NextResponse.json({
-      success: true,
       message: 'Webhook received',
       ...result
     });
