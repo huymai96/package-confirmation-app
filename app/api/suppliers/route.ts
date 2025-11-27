@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DEFAULT_SUPPLIERS, findSupplierByZip, Supplier } from '../../lib/suppliers';
 import { trackPackage } from '../../lib/ups-integration';
-import { trackFedExPackage } from '../../lib/fedex-integration';
+import { trackPackage as trackFedExPackage } from '../../lib/fedex-integration';
 import * as cloud from '../../lib/cloud-storage';
 
 export const dynamic = 'force-dynamic';
