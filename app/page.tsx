@@ -49,6 +49,12 @@ interface UPSLiveData {
   weight?: string;
   service?: string;
   events: TrackingEvent[];
+  // Reference fields
+  shipperReference?: string;
+  poNumber?: string;
+  invoiceNumber?: string;
+  shipperName?: string;
+  recipientName?: string;
 }
 
 interface FedExLiveData {
@@ -62,6 +68,15 @@ interface FedExLiveData {
   service?: string;
   signedBy?: string;
   events: TrackingEvent[];
+  // Reference fields
+  shipperReference?: string;
+  poNumber?: string;
+  invoiceNumber?: string;
+  shipperName?: string;
+  recipientName?: string;
+  customerReference?: string;
+  origin?: { city: string; state: string; country: string; postalCode: string };
+  destination?: { city: string; state: string; country: string; postalCode: string };
 }
 
 interface PackageResult {
@@ -452,6 +467,52 @@ export default function Home() {
                       <span className="text-xs bg-green-500 text-white px-2 py-0.5 rounded-full ml-1">DELIVERED</span>
                     )}
                   </h3>
+                  
+                  {/* Reference Numbers - Prominent Display */}
+                  {(result.upsLive.poNumber || result.upsLive.invoiceNumber || result.upsLive.shipperReference) && (
+                    <div className="bg-amber-200/50 rounded-lg p-2 mb-3 border border-amber-300">
+                      <p className="text-amber-800 text-xs font-semibold mb-1">📋 Reference Info</p>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        {result.upsLive.poNumber && (
+                          <div>
+                            <span className="text-amber-700 text-xs">PO#:</span>
+                            <span className="font-bold text-gray-900 ml-1">{result.upsLive.poNumber}</span>
+                          </div>
+                        )}
+                        {result.upsLive.invoiceNumber && (
+                          <div>
+                            <span className="text-amber-700 text-xs">Invoice#:</span>
+                            <span className="font-bold text-gray-900 ml-1">{result.upsLive.invoiceNumber}</span>
+                          </div>
+                        )}
+                        {result.upsLive.shipperReference && (
+                          <div className="col-span-2">
+                            <span className="text-amber-700 text-xs">Reference:</span>
+                            <span className="font-bold text-gray-900 ml-1">{result.upsLive.shipperReference}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Shipper/Recipient Names */}
+                  {(result.upsLive.shipperName || result.upsLive.recipientName) && (
+                    <div className="grid grid-cols-2 gap-2 mb-3 text-sm">
+                      {result.upsLive.shipperName && (
+                        <div>
+                          <p className="text-amber-600 text-xs">From</p>
+                          <p className="font-bold text-gray-800">{result.upsLive.shipperName}</p>
+                        </div>
+                      )}
+                      {result.upsLive.recipientName && (
+                        <div>
+                          <p className="text-amber-600 text-xs">To</p>
+                          <p className="font-bold text-gray-800">{result.upsLive.recipientName}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <p className="text-amber-600 text-xs">Status</p>
@@ -509,6 +570,66 @@ export default function Home() {
                       <span className="text-xs bg-green-500 text-white px-2 py-0.5 rounded-full ml-1">DELIVERED</span>
                     )}
                   </h3>
+
+                  {/* Reference Numbers - Prominent Display */}
+                  {(result.fedexLive.poNumber || result.fedexLive.invoiceNumber || result.fedexLive.shipperReference || result.fedexLive.customerReference) && (
+                    <div className="bg-purple-200/50 rounded-lg p-2 mb-3 border border-purple-300">
+                      <p className="text-purple-800 text-xs font-semibold mb-1">📋 Reference Info</p>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        {result.fedexLive.poNumber && (
+                          <div>
+                            <span className="text-purple-700 text-xs">PO#:</span>
+                            <span className="font-bold text-gray-900 ml-1">{result.fedexLive.poNumber}</span>
+                          </div>
+                        )}
+                        {result.fedexLive.invoiceNumber && (
+                          <div>
+                            <span className="text-purple-700 text-xs">Invoice#:</span>
+                            <span className="font-bold text-gray-900 ml-1">{result.fedexLive.invoiceNumber}</span>
+                          </div>
+                        )}
+                        {result.fedexLive.shipperReference && (
+                          <div>
+                            <span className="text-purple-700 text-xs">Shipper Ref:</span>
+                            <span className="font-bold text-gray-900 ml-1">{result.fedexLive.shipperReference}</span>
+                          </div>
+                        )}
+                        {result.fedexLive.customerReference && (
+                          <div>
+                            <span className="text-purple-700 text-xs">Customer Ref:</span>
+                            <span className="font-bold text-gray-900 ml-1">{result.fedexLive.customerReference}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Shipper/Recipient Names & Origin/Destination */}
+                  <div className="grid grid-cols-2 gap-2 mb-3 text-sm">
+                    {(result.fedexLive.shipperName || result.fedexLive.origin?.city) && (
+                      <div>
+                        <p className="text-purple-600 text-xs">From</p>
+                        <p className="font-bold text-gray-800">
+                          {result.fedexLive.shipperName || `${result.fedexLive.origin?.city}, ${result.fedexLive.origin?.state || result.fedexLive.origin?.country}`}
+                        </p>
+                        {result.fedexLive.shipperName && result.fedexLive.origin?.city && (
+                          <p className="text-gray-600 text-xs">{result.fedexLive.origin.city}, {result.fedexLive.origin.state || result.fedexLive.origin.country}</p>
+                        )}
+                      </div>
+                    )}
+                    {(result.fedexLive.recipientName || result.fedexLive.destination?.city) && (
+                      <div>
+                        <p className="text-purple-600 text-xs">To</p>
+                        <p className="font-bold text-gray-800">
+                          {result.fedexLive.recipientName || `${result.fedexLive.destination?.city}, ${result.fedexLive.destination?.state}`}
+                        </p>
+                        {result.fedexLive.recipientName && result.fedexLive.destination?.city && (
+                          <p className="text-gray-600 text-xs">{result.fedexLive.destination.city}, {result.fedexLive.destination.state}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <p className="text-purple-600 text-xs">Status</p>

@@ -56,6 +56,13 @@ interface FedExPackage {
   isException: boolean;
   exceptionReason?: string;
   signedBy?: string;
+  // Reference fields
+  shipperReference?: string;
+  poNumber?: string;
+  invoiceNumber?: string;
+  customerReference?: string;
+  shipperName?: string;
+  recipientName?: string;
 }
 
 // Token cache
@@ -164,6 +171,46 @@ export async function trackPackage(trackingNumber: string): Promise<FedExPackage
                         latestStatus?.code === 'DE' || 
                         latestStatus?.code === 'SE';
 
+    // Extract reference numbers from shipment details
+    const shipmentDetails = trackResult.shipmentDetails || {};
+    const packageDetails = trackResult.packageDetails || {};
+    
+    // FedEx stores references in different places
+    const references = packageDetails.packageContent?.contentPieceList?.[0]?.references || 
+                       shipmentDetails.contents?.[0]?.references ||
+                       trackResult.shipperInformation?.contact?.references || [];
+    
+    // Parse reference fields
+    let shipperReference = '';
+    let poNumber = '';
+    let invoiceNumber = '';
+    let customerReference = '';
+    
+    if (Array.isArray(references)) {
+      for (const ref of references) {
+        const type = (ref.type || ref.referenceType || '').toUpperCase();
+        const value = ref.value || ref.referenceValue || '';
+        
+        if (type.includes('PO') || type.includes('PURCHASE')) {
+          poNumber = value;
+        } else if (type.includes('INVOICE') || type.includes('INV')) {
+          invoiceNumber = value;
+        } else if (type.includes('SHIPPER') || type === 'SHIPPER_REFERENCE') {
+          shipperReference = value;
+        } else if (type.includes('CUSTOMER') || type === 'CUSTOMER_REFERENCE') {
+          customerReference = value;
+        } else if (!shipperReference && value) {
+          shipperReference = value; // Use first reference as shipper reference if no specific type
+        }
+      }
+    }
+
+    // Get shipper and recipient names
+    const shipperName = trackResult.shipperInformation?.contact?.companyName || 
+                        trackResult.shipperInformation?.contact?.personName || '';
+    const recipientName = trackResult.recipientInformation?.contact?.companyName ||
+                          trackResult.recipientInformation?.contact?.personName || '';
+
     return {
       trackingNumber,
       status: latestStatus?.code || 'Unknown',
@@ -187,7 +234,14 @@ export async function trackPackage(trackingNumber: string): Promise<FedExPackage
       events,
       isException,
       exceptionReason: isException ? latestStatus?.statusByLocale : undefined,
-      signedBy: trackResult.deliveryDetails?.receivedByName
+      signedBy: trackResult.deliveryDetails?.receivedByName,
+      // Reference fields
+      shipperReference,
+      poNumber,
+      invoiceNumber,
+      customerReference,
+      shipperName,
+      recipientName
     };
   } catch (error) {
     console.error('FedEx tracking error:', error);

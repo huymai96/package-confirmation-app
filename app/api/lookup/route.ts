@@ -82,7 +82,13 @@ export async function GET(request: Request) {
                   exceptionReason: upsData.exceptionReason,
                   weight: upsData.weight,
                   service: upsData.service,
-                  events: upsData.events.slice(0, 5)
+                  events: upsData.events.slice(0, 5),
+                  // Reference fields
+                  shipperReference: upsData.shipperReference,
+                  poNumber: upsData.poNumber,
+                  invoiceNumber: upsData.invoiceNumber,
+                  shipperName: upsData.shipperName,
+                  recipientName: upsData.recipientName
                 }
               });
             }
@@ -109,7 +115,17 @@ export async function GET(request: Request) {
                   weight: fedexData.weight,
                   service: fedexData.service,
                   signedBy: fedexData.signedBy,
-                  events: fedexData.events.slice(0, 5)
+                  events: fedexData.events.slice(0, 5),
+                  // Reference fields
+                  shipperReference: fedexData.shipperReference,
+                  poNumber: fedexData.poNumber,
+                  invoiceNumber: fedexData.invoiceNumber,
+                  shipperName: fedexData.shipperName,
+                  recipientName: fedexData.recipientName,
+                  customerReference: fedexData.customerReference,
+                  // Origin/Destination
+                  origin: fedexData.origin,
+                  destination: fedexData.destination
                 }
               });
             }

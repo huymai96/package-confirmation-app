@@ -52,6 +52,12 @@ interface UPSPackage {
   events: UPSTrackingEvent[];
   isException: boolean;
   exceptionReason?: string;
+  // Reference fields
+  shipperReference?: string;
+  poNumber?: string;
+  invoiceNumber?: string;
+  shipperName?: string;
+  recipientName?: string;
 }
 
 interface QuantumViewShipment {
@@ -153,6 +159,33 @@ export async function trackPackage(trackingNumber: string): Promise<UPSPackage |
 
     const isException = currentStatus?.status?.type === 'X';
 
+    // Extract reference numbers from UPS response
+    const referenceNumbers = pkg.referenceNumber || shipment.referenceNumber || [];
+    let shipperReference = '';
+    let poNumber = '';
+    let invoiceNumber = '';
+    
+    if (Array.isArray(referenceNumbers)) {
+      for (const ref of referenceNumbers) {
+        const code = (ref.code || ref.type || '').toUpperCase();
+        const value = ref.value || ref.number || '';
+        
+        if (code === 'PO' || code.includes('PURCHASE')) {
+          poNumber = value;
+        } else if (code === 'IN' || code.includes('INVOICE')) {
+          invoiceNumber = value;
+        } else if (code === 'SH' || code.includes('SHIPPER')) {
+          shipperReference = value;
+        } else if (!shipperReference && value) {
+          shipperReference = value;
+        }
+      }
+    }
+
+    // Get shipper and recipient names
+    const shipperName = shipment.shipper?.companyName || shipment.shipper?.name || '';
+    const recipientName = shipment.shipTo?.companyName || shipment.shipTo?.name || '';
+
     return {
       trackingNumber,
       status: currentStatus?.status?.type || 'Unknown',
@@ -173,7 +206,13 @@ export async function trackPackage(trackingNumber: string): Promise<UPSPackage |
       weight: pkg.weight?.weight,
       events,
       isException,
-      exceptionReason: isException ? currentStatus?.status?.description : undefined
+      exceptionReason: isException ? currentStatus?.status?.description : undefined,
+      // Reference fields
+      shipperReference,
+      poNumber,
+      invoiceNumber,
+      shipperName,
+      recipientName
     };
   } catch (error) {
     console.error('UPS tracking error:', error);
