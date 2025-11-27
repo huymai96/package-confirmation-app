@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { trackPackage, isConfigured as isUPSConfigured } from '@/app/lib/ups-integration';
+import { trackPackage as trackUPS, isConfigured as isUPSConfigured } from '@/app/lib/ups-integration';
+import { trackPackage as trackFedEx, isConfigured as isFedExConfigured, isFedExTracking } from '@/app/lib/fedex-integration';
 
 // Check if running in cloud mode (Vercel) or local mode
 const IS_CLOUD = process.env.BLOB_READ_WRITE_TOKEN ? true : false;
@@ -19,6 +20,13 @@ async function getCloudFunctions() {
 function isUPSTracking(tracking: string): boolean {
   // UPS tracking numbers start with 1Z and are 18 characters
   return /^1Z[A-Z0-9]{16}$/i.test(tracking.trim());
+}
+
+// Detect carrier from tracking number
+function detectCarrier(tracking: string): 'ups' | 'fedex' | 'unknown' {
+  if (isUPSTracking(tracking)) return 'ups';
+  if (isFedExTracking(tracking)) return 'fedex';
+  return 'unknown';
 }
 
 export const dynamic = 'force-dynamic';
@@ -54,14 +62,17 @@ export async function GET(request: Request) {
         // Get local data first
         const result = await cloud.lookupPackage(query);
         
-        // If it's a UPS tracking number, also get live UPS data
-        if (isUPSTracking(query) && isUPSConfigured()) {
+        // Detect carrier and get live tracking data
+        const carrier = detectCarrier(query);
+        
+        // If it's a UPS tracking number, get live UPS data
+        if (carrier === 'ups' && isUPSConfigured()) {
           try {
-            const upsData = await trackPackage(query.trim());
+            const upsData = await trackUPS(query.trim());
             if (upsData) {
-              // Merge UPS live data with our local data
               return NextResponse.json({
                 ...result,
+                carrier: 'UPS',
                 upsLive: {
                   status: upsData.statusDescription,
                   deliveredAt: upsData.actualDelivery,
@@ -71,13 +82,39 @@ export async function GET(request: Request) {
                   exceptionReason: upsData.exceptionReason,
                   weight: upsData.weight,
                   service: upsData.service,
-                  events: upsData.events.slice(0, 5) // Last 5 events
+                  events: upsData.events.slice(0, 5)
                 }
               });
             }
           } catch (upsError) {
             console.error('UPS tracking error:', upsError);
-            // Return result without UPS data if UPS fails
+          }
+        }
+        
+        // If it's a FedEx tracking number, get live FedEx data
+        if (carrier === 'fedex' && isFedExConfigured()) {
+          try {
+            const fedexData = await trackFedEx(query.trim());
+            if (fedexData) {
+              return NextResponse.json({
+                ...result,
+                carrier: 'FedEx',
+                fedexLive: {
+                  status: fedexData.statusDescription,
+                  deliveredAt: fedexData.actualDelivery,
+                  estimatedDelivery: fedexData.estimatedDelivery,
+                  location: fedexData.events[0]?.location,
+                  isException: fedexData.isException,
+                  exceptionReason: fedexData.exceptionReason,
+                  weight: fedexData.weight,
+                  service: fedexData.service,
+                  signedBy: fedexData.signedBy,
+                  events: fedexData.events.slice(0, 5)
+                }
+              });
+            }
+          } catch (fedexError) {
+            console.error('FedEx tracking error:', fedexError);
           }
         }
         
