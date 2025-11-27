@@ -183,7 +183,7 @@ export async function trackPackage(trackingNumber: string): Promise<UPSPackage |
 
 /**
  * Get Quantum View data for all accounts
- * This retrieves inbound and outbound shipments visibility
+ * Uses the Quantum View Response API to retrieve subscription data
  */
 export async function getQuantumViewData(): Promise<QuantumViewShipment[]> {
   try {
@@ -191,43 +191,157 @@ export async function getQuantumViewData(): Promise<QuantumViewShipment[]> {
     const allShipments: QuantumViewShipment[] = [];
 
     for (const accountNumber of UPS_CONFIG.accountNumbers) {
-      if (!accountNumber) continue;
+      if (!accountNumber.trim()) continue;
 
-      // Get Quantum View Manage data
+      // Use Quantum View Response API
       const response = await fetch(
-        `${UPS_CONFIG.baseUrl}/api/quantum-view/v1/subscriptions/${accountNumber}/events`,
+        `${UPS_CONFIG.baseUrl}/api/quantumview/v1/response`,
         {
+          method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
             'transId': `qv-${Date.now()}`,
             'transactionSrc': 'PromoInkSupplyChain'
-          }
+          },
+          body: JSON.stringify({
+            QuantumViewRequest: {
+              Request: {
+                TransactionReference: {
+                  CustomerContext: 'PromoInkSupplyChain'
+                }
+              },
+              SubscriptionRequest: {
+                Name: accountNumber.trim(),
+                // Get all available subscription types
+                DateTimeRange: {
+                  // Last 7 days of data
+                  BeginDateTime: getDateOffset(-7),
+                  EndDateTime: getDateOffset(0)
+                }
+              }
+            }
+          })
         }
       );
 
       if (!response.ok) {
-        console.error(`Quantum View failed for ${accountNumber}: ${response.status}`);
+        const errorText = await response.text();
+        console.error(`Quantum View failed for ${accountNumber}: ${response.status} - ${errorText}`);
         continue;
       }
 
       const data = await response.json();
       
-      // Parse Quantum View response
-      const events = data.quantumViewEvents || [];
-      for (const event of events) {
-        const shipment: QuantumViewShipment = {
-          trackingNumber: event.trackingNumber || '',
-          shipperName: event.shipper?.name || '',
-          shipperAddress: `${event.shipper?.city || ''}, ${event.shipper?.state || ''}`,
-          recipientName: event.recipient?.name || '',
-          recipientAddress: `${event.recipient?.city || ''}, ${event.recipient?.state || ''}`,
-          scheduledDelivery: event.scheduledDeliveryDate || '',
-          status: event.status || '',
-          direction: event.direction === 'INBOUND' ? 'inbound' : 'outbound',
-          accountNumber
-        };
-        allShipments.push(shipment);
+      // Parse Quantum View Response
+      const qvResponse = data.QuantumViewResponse;
+      if (!qvResponse) continue;
+
+      // Process subscription files
+      const subscriptionEvents = qvResponse.QuantumViewEvents?.SubscriptionEvents;
+      if (!subscriptionEvents) continue;
+
+      const subscriptionFiles = subscriptionEvents.SubscriptionFile || [];
+      const files = Array.isArray(subscriptionFiles) ? subscriptionFiles : [subscriptionFiles];
+
+      for (const file of files) {
+        // Process Manifest (Outbound - labels created)
+        if (file.Manifest) {
+          const manifests = Array.isArray(file.Manifest) ? file.Manifest : [file.Manifest];
+          for (const manifest of manifests) {
+            const packages = manifest.Package ? (Array.isArray(manifest.Package) ? manifest.Package : [manifest.Package]) : [];
+            for (const pkg of packages) {
+              allShipments.push({
+                trackingNumber: pkg.TrackingNumber || '',
+                shipperName: manifest.Shipper?.Name || '',
+                shipperAddress: `${manifest.Shipper?.Address?.City || ''}, ${manifest.Shipper?.Address?.StateProvinceCode || ''}`,
+                recipientName: manifest.ShipTo?.CompanyName || manifest.ShipTo?.AttentionName || '',
+                recipientAddress: `${manifest.ShipTo?.Address?.City || ''}, ${manifest.ShipTo?.Address?.StateProvinceCode || ''}`,
+                scheduledDelivery: pkg.ScheduledDeliveryDate || '',
+                status: 'MANIFEST',
+                direction: 'outbound',
+                accountNumber
+              });
+            }
+          }
+        }
+
+        // Process Origin (Outbound - picked up)
+        if (file.Origin) {
+          const origins = Array.isArray(file.Origin) ? file.Origin : [file.Origin];
+          for (const origin of origins) {
+            allShipments.push({
+              trackingNumber: origin.TrackingNumber || '',
+              shipperName: origin.Shipper?.Name || '',
+              shipperAddress: `${origin.ActivityLocation?.City || ''}, ${origin.ActivityLocation?.StateProvinceCode || ''}`,
+              recipientName: origin.ShipTo?.CompanyName || '',
+              recipientAddress: `${origin.ShipTo?.Address?.City || ''}, ${origin.ShipTo?.Address?.StateProvinceCode || ''}`,
+              scheduledDelivery: origin.ScheduledDeliveryDate || '',
+              status: 'ORIGIN_SCAN',
+              direction: 'outbound',
+              accountNumber
+            });
+          }
+        }
+
+        // Process Delivery (Delivered packages)
+        if (file.Delivery) {
+          const deliveries = Array.isArray(file.Delivery) ? file.Delivery : [file.Delivery];
+          for (const delivery of deliveries) {
+            allShipments.push({
+              trackingNumber: delivery.TrackingNumber || '',
+              shipperName: delivery.Shipper?.Name || '',
+              shipperAddress: '',
+              recipientName: delivery.ShipTo?.CompanyName || '',
+              recipientAddress: `${delivery.DeliveryLocation?.City || ''}, ${delivery.DeliveryLocation?.StateProvinceCode || ''}`,
+              scheduledDelivery: '',
+              status: 'DELIVERED',
+              direction: 'outbound',
+              accountNumber
+            });
+          }
+        }
+
+        // Process Exception
+        if (file.Exception) {
+          const exceptions = Array.isArray(file.Exception) ? file.Exception : [file.Exception];
+          for (const exception of exceptions) {
+            allShipments.push({
+              trackingNumber: exception.TrackingNumber || '',
+              shipperName: exception.Shipper?.Name || '',
+              shipperAddress: '',
+              recipientName: exception.ShipTo?.CompanyName || '',
+              recipientAddress: `${exception.ShipTo?.Address?.City || ''}, ${exception.ShipTo?.Address?.StateProvinceCode || ''}`,
+              scheduledDelivery: '',
+              status: `EXCEPTION: ${exception.StatusType?.Description || 'Unknown'}`,
+              direction: 'outbound',
+              accountNumber
+            });
+          }
+        }
+
+        // Process Generic (Inbound and other events)
+        if (file.Generic) {
+          const generics = Array.isArray(file.Generic) ? file.Generic : [file.Generic];
+          for (const generic of generics) {
+            // Determine direction based on ship-to address matching our warehouses
+            const destCity = generic.ShipTo?.Address?.City?.toUpperCase() || '';
+            const destZip = generic.ShipTo?.Address?.PostalCode || '';
+            const isInbound = destCity === 'DALLAS' && (destZip === '75234' || destZip.startsWith('75234'));
+            
+            allShipments.push({
+              trackingNumber: generic.TrackingNumber || '',
+              shipperName: generic.Shipper?.Name || '',
+              shipperAddress: `${generic.Shipper?.Address?.City || ''}, ${generic.Shipper?.Address?.StateProvinceCode || ''}`,
+              recipientName: generic.ShipTo?.CompanyName || '',
+              recipientAddress: `${generic.ShipTo?.Address?.City || ''}, ${generic.ShipTo?.Address?.StateProvinceCode || ''}`,
+              scheduledDelivery: generic.ScheduledDeliveryDate || '',
+              status: generic.ActivityType || 'IN_TRANSIT',
+              direction: isInbound ? 'inbound' : 'outbound',
+              accountNumber
+            });
+          }
+        }
       }
     }
 
@@ -236,6 +350,16 @@ export async function getQuantumViewData(): Promise<QuantumViewShipment[]> {
     console.error('Quantum View error:', error);
     return [];
   }
+}
+
+// Helper to get date in UPS format (YYYYMMDDHHMMSS)
+function getDateOffset(daysOffset: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + daysOffset);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}${month}${day}000000`;
 }
 
 /**
