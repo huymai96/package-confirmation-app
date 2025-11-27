@@ -85,10 +85,10 @@ export async function GET(request: Request) {
     let filename = 'export';
 
     if (source === 'inbound') {
-      data = await cloud.getRecentInbound(100);
+      data = await cloud.getRecentInbound();
       filename = `inbound-scans-${new Date().toISOString().split('T')[0]}`;
     } else if (source === 'outbound') {
-      data = await cloud.getRecentOutbound(100);
+      data = await cloud.getRecentOutbound();
       filename = `outbound-shipments-${new Date().toISOString().split('T')[0]}`;
     } else {
       return NextResponse.json({
