@@ -5,8 +5,14 @@ export const dynamic = 'force-dynamic';
 const UPS_CONFIG = {
   clientId: process.env.UPS_CLIENT_ID || '',
   clientSecret: process.env.UPS_CLIENT_SECRET || '',
-  accountNumbers: (process.env.UPS_ACCOUNT_NUMBERS || '').split(',').map(s => s.trim()).filter(Boolean),
   baseUrl: 'https://onlinetools.ups.com'
+};
+
+// ACTUAL subscription names from UPS Quantum View setup
+const SUBSCRIPTION_NAMES = {
+  inbound: ['PROMOS INK', 'Promos Ink Inc', '13911'],
+  outbound: ['E45A82', 'W34D92', 'W34G18', 'K9Y228'],
+  thirdParty: ['E45A82', 'W34D92', 'W34G18']
 };
 
 function getDateOffset(days: number): string {
@@ -35,32 +41,28 @@ export async function GET() {
         step: 'oauth',
         error: 'OAuth failed',
         status: tokenResponse.status,
-        details: tokenError,
-        config: {
-          hasClientId: !!UPS_CONFIG.clientId,
-          hasClientSecret: !!UPS_CONFIG.clientSecret,
-          accountNumbers: UPS_CONFIG.accountNumbers
-        }
+        details: tokenError
       });
     }
 
     const tokenData = await tokenResponse.json();
     
-    // Step 2: Try Quantum View for each account
+    // Step 2: Try each subscription name
     const results: any[] = [];
     
-    for (const accountNumber of UPS_CONFIG.accountNumbers) {
-      // Try different subscription name formats
-      const subscriptionNames = [
-        accountNumber,
-        `QV_${accountNumber}`,
-        `${accountNumber}_INBOUND`,
-        `${accountNumber}_OUTBOUND`
-      ];
-
-      // Only test first subscription name format for each account
-      const subName = accountNumber;
-      
+    // Test all subscription names
+    const allNames = [
+      ...SUBSCRIPTION_NAMES.inbound.map(n => ({ name: n, type: 'inbound' })),
+      ...SUBSCRIPTION_NAMES.outbound.map(n => ({ name: n, type: 'outbound' })),
+      ...SUBSCRIPTION_NAMES.thirdParty.map(n => ({ name: n, type: 'thirdParty' }))
+    ];
+    
+    // Remove duplicates
+    const uniqueNames = allNames.filter((item, index, self) =>
+      index === self.findIndex(t => t.name === item.name)
+    );
+    
+    for (const { name: subName, type } of uniqueNames) {
       try {
         const qvResponse = await fetch(
           `${UPS_CONFIG.baseUrl}/api/quantumview/v1/response`,
@@ -76,7 +78,7 @@ export async function GET() {
               QuantumViewRequest: {
                 Request: {
                   TransactionReference: {
-                    CustomerContext: 'Debug'
+                    CustomerContext: 'PromoInkSupplyChain'
                   }
                 },
                 SubscriptionRequest: {
@@ -104,19 +106,19 @@ export async function GET() {
         }
         
         results.push({
-          accountNumber,
           subscriptionName: subName,
+          subscriptionType: type,
           httpStatus: qvResponse.status,
-          headers: Object.fromEntries(qvResponse.headers.entries()),
           rawResponseLength: rawText?.length || 0,
-          rawResponse: rawText?.substring(0, 2000) || '(empty)',
-          parsed
+          rawResponse: rawText?.substring(0, 1500) || '(empty)',
+          parsed,
+          hasData: !!parsed?.QuantumViewResponse?.QuantumViewEvents
         });
 
       } catch (err) {
         results.push({
-          accountNumber,
           subscriptionName: subName,
+          subscriptionType: type,
           error: String(err)
         });
       }
@@ -125,10 +127,7 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       oauthWorking: true,
-      config: {
-        accountNumbers: UPS_CONFIG.accountNumbers,
-        hasClientId: !!UPS_CONFIG.clientId
-      },
+      subscriptionConfig: SUBSCRIPTION_NAMES,
       dateRange: {
         begin: getDateOffset(-7),
         end: getDateOffset(0)
@@ -142,4 +141,3 @@ export async function GET() {
     }, { status: 500 });
   }
 }
-

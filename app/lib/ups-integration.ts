@@ -16,6 +16,13 @@ const UPS_CONFIG = {
   tokenUrl: 'https://onlinetools.ups.com/security/v1/oauth/token'
 };
 
+// Quantum View subscription names (configured in UPS Quantum View portal)
+const QV_SUBSCRIPTIONS = {
+  inbound: ['PROMOS INK', 'Promos Ink Inc', '13911'],
+  outbound: ['E45A82', 'W34D92', 'W34G18', 'K9Y228'],
+  thirdParty: ['E45A82', 'W34D92', 'W34G18']
+};
+
 interface UPSToken {
   access_token: string;
   token_type: string;
@@ -221,7 +228,7 @@ export async function trackPackage(trackingNumber: string): Promise<UPSPackage |
 }
 
 /**
- * Get Quantum View data for all accounts
+ * Get Quantum View data for all subscriptions
  * Uses the Quantum View Response API to retrieve subscription data
  */
 export async function getQuantumViewData(): Promise<QuantumViewShipment[]> {
@@ -229,8 +236,20 @@ export async function getQuantumViewData(): Promise<QuantumViewShipment[]> {
     const token = await getAccessToken();
     const allShipments: QuantumViewShipment[] = [];
 
-    for (const accountNumber of UPS_CONFIG.accountNumbers) {
-      if (!accountNumber.trim()) continue;
+    // Get all unique subscription names
+    const allSubscriptions = [
+      ...QV_SUBSCRIPTIONS.inbound.map(name => ({ name, direction: 'inbound' as const })),
+      ...QV_SUBSCRIPTIONS.outbound.map(name => ({ name, direction: 'outbound' as const })),
+      ...QV_SUBSCRIPTIONS.thirdParty.map(name => ({ name, direction: 'inbound' as const })) // 3rd party treated as inbound
+    ];
+    
+    // Remove duplicates
+    const uniqueSubs = allSubscriptions.filter((item, index, self) =>
+      index === self.findIndex(t => t.name === item.name)
+    );
+
+    for (const { name: subscriptionName, direction } of uniqueSubs) {
+      if (!subscriptionName.trim()) continue;
 
       // Use Quantum View Response API
       const response = await fetch(
@@ -251,10 +270,8 @@ export async function getQuantumViewData(): Promise<QuantumViewShipment[]> {
                 }
               },
               SubscriptionRequest: {
-                Name: accountNumber.trim(),
-                // Get all available subscription types
+                Name: subscriptionName.trim(),
                 DateTimeRange: {
-                  // Last 7 days of data
                   BeginDateTime: getDateOffset(-7),
                   EndDateTime: getDateOffset(0)
                 }
@@ -266,9 +283,11 @@ export async function getQuantumViewData(): Promise<QuantumViewShipment[]> {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`Quantum View failed for ${accountNumber}: ${response.status} - ${errorText}`);
+        console.error(`Quantum View failed for ${subscriptionName}: ${response.status} - ${errorText}`);
         continue;
       }
+      
+      const accountNumber = subscriptionName;
 
       const data = await response.json();
       
