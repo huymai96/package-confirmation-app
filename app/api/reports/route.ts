@@ -164,7 +164,7 @@ export async function GET(request: NextRequest) {
           po: s.po || '',
           timestamp: s.timestamp,
           status: s.status,
-          shipper: s.shipper || ''
+          customer: s.customer || ''
         })),
         outbound: outboundData.slice(0, 1000).map(s => ({
           tracking: s.tracking,
@@ -179,9 +179,9 @@ export async function GET(request: NextRequest) {
       if (format === 'csv') {
         // Return CSV format
         const inboundCsv = [
-          'Tracking,PO,Timestamp,Status,Shipper',
+          'Tracking,PO,Timestamp,Status,Customer',
           ...exportData.inbound.map(r => 
-            `"${r.tracking}","${r.po}","${r.timestamp}","${r.status}","${r.shipper}"`
+            `"${r.tracking}","${r.po}","${r.timestamp}","${r.status}","${r.customer}"`
           )
         ].join('\n');
 
