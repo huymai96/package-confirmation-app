@@ -5,8 +5,10 @@ import {
   Search, Package, ArrowDownToLine, ArrowUpFromLine, 
   CheckCircle, XCircle, Truck, Clock, AlertTriangle,
   MapPin, Calendar, Building2, RefreshCw, Filter,
-  Download, Upload, FileSpreadsheet, Play, Loader2
+  Download, Upload, FileSpreadsheet, Play, Loader2,
+  Users, BarChart3, TrendingUp, ExternalLink, Printer, Eye
 } from 'lucide-react';
+import TrackingModal from './components/TrackingModal';
 
 interface InboundInfo {
   scanned: boolean;
@@ -50,7 +52,6 @@ interface UPSLiveData {
   weight?: string;
   service?: string;
   events: TrackingEvent[];
-  // Reference fields
   shipperReference?: string;
   poNumber?: string;
   invoiceNumber?: string;
@@ -69,7 +70,6 @@ interface FedExLiveData {
   service?: string;
   signedBy?: string;
   events: TrackingEvent[];
-  // Reference fields
   shipperReference?: string;
   poNumber?: string;
   invoiceNumber?: string;
@@ -172,6 +172,42 @@ interface BatchStats {
   unknown: number;
 }
 
+interface Supplier {
+  id: string;
+  name: string;
+  shortName: string;
+  website: string;
+  zipCodes: string[];
+  city: string;
+  state: string;
+  category: string;
+  contact?: { phone?: string; email?: string };
+  notes?: string;
+}
+
+interface ReportData {
+  summary: {
+    totalInbound: number;
+    totalOutbound: number;
+    todayInbound: number;
+    todayOutbound: number;
+    lastUpdated: string;
+  };
+  dailyStats: Array<{
+    date: string;
+    inboundCount: number;
+    outboundCount: number;
+    deliveredCount: number;
+    exceptionsCount: number;
+  }>;
+  performance: {
+    totalShipments: number;
+    avgDailyInbound: number;
+    avgDailyOutbound: number;
+    exceptionsToday: number;
+  };
+}
+
 export default function Home() {
   const [query, setQuery] = useState('');
   const [originZip, setOriginZip] = useState('');
@@ -179,7 +215,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [recentScans, setRecentScans] = useState<RecentScan[]>([]);
   const [recentOutbound, setRecentOutbound] = useState<RecentOutbound[]>([]);
-  const [activeTab, setActiveTab] = useState<'search' | 'inbound' | 'outbound' | 'quantum' | 'batch'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'inbound' | 'outbound' | 'quantum' | 'batch' | 'suppliers' | 'reports'>('search');
   const [stats, setStats] = useState({ inboundTotal: 0, outboundTotal: 0 });
   const [qvStats, setQvStats] = useState<QVStats>({ totalEvents: 0, totalShipments: 0 });
   const [inboundResults, setInboundResults] = useState<InboundShipment[]>([]);
@@ -196,10 +232,26 @@ export default function Home() {
   const [qvLoading, setQvLoading] = useState(false);
   const [qvSubTab, setQvSubTab] = useState<'inbound' | 'outbound' | 'arriving' | 'exceptions'>('inbound');
 
+  // Suppliers state
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [selectedSupplier, setSelectedSupplier] = useState<string | null>(null);
+  const [supplierShipments, setSupplierShipments] = useState<any[]>([]);
+  const [supplierLoading, setSupplierLoading] = useState(false);
+
+  // Reports state
+  const [reportData, setReportData] = useState<ReportData | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTracking, setModalTracking] = useState('');
+  const [modalCarrier, setModalCarrier] = useState<'UPS' | 'FedEx'>('UPS');
+
   useEffect(() => {
     fetchRecent();
     fetchStats();
     fetchQVStats();
+    fetchSuppliers();
   }, []);
 
   const fetchRecent = async () => {
@@ -234,6 +286,43 @@ export default function Home() {
     }
   };
 
+  const fetchSuppliers = async () => {
+    try {
+      const res = await fetch('/api/suppliers?action=list');
+      const data = await res.json();
+      setSuppliers(data.suppliers || []);
+    } catch (error) {
+      console.error('Error fetching suppliers:', error);
+    }
+  };
+
+  const fetchSupplierShipments = async (supplierId: string) => {
+    setSupplierLoading(true);
+    setSelectedSupplier(supplierId);
+    try {
+      const res = await fetch(`/api/suppliers?action=shipments&supplierId=${supplierId}`);
+      const data = await res.json();
+      setSupplierShipments(data.shipments || []);
+    } catch (error) {
+      console.error('Error fetching supplier shipments:', error);
+    } finally {
+      setSupplierLoading(false);
+    }
+  };
+
+  const fetchReports = async () => {
+    setReportLoading(true);
+    try {
+      const res = await fetch('/api/reports?action=summary&days=7');
+      const data = await res.json();
+      setReportData(data);
+    } catch (error) {
+      console.error('Error fetching reports:', error);
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
   const handleSearch = async (searchQuery?: string) => {
     const q = searchQuery || query;
     if (!q.trim()) return;
@@ -258,6 +347,18 @@ export default function Home() {
     }
   };
 
+  const openTrackingModal = (tracking: string, carrier: 'UPS' | 'FedEx') => {
+    setModalTracking(tracking);
+    setModalCarrier(carrier);
+    setModalOpen(true);
+  };
+
+  const detectCarrier = (tracking: string): 'UPS' | 'FedEx' => {
+    const t = tracking.trim().toUpperCase();
+    if (t.startsWith('1Z') || (t.length === 18 && /^\d+$/.test(t))) return 'UPS';
+    return 'FedEx';
+  };
+
   // Refresh Quantum View data from UPS
   const refreshQuantumView = async () => {
     setQvLoading(true);
@@ -275,7 +376,7 @@ export default function Home() {
       setQvData({
         inbound: allData.inbound?.shipments || [],
         outbound: allData.outbound?.shipments || [],
-        thirdParty: [], // Will add if available
+        thirdParty: [],
         arrivingToday: arrivingData.shipments || [],
         exceptions: exceptionsData.shipments || []
       });
@@ -364,6 +465,14 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900">
+      {/* Tracking Modal */}
+      <TrackingModal 
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        tracking={modalTracking}
+        carrier={modalCarrier}
+      />
+
       {/* Header */}
       <header className="bg-white/10 backdrop-blur-md border-b border-white/10">
         <div className="max-w-7xl mx-auto px-4 py-4">
@@ -411,7 +520,6 @@ export default function Home() {
             </div>
           </div>
           
-          {/* Batch Stats - Show when batch results exist */}
           {batchStats ? (
             <>
               <div className="bg-emerald-500/20 backdrop-blur-sm rounded-2xl p-4 border border-emerald-400/30">
@@ -464,10 +572,28 @@ export default function Home() {
               </div>
               <div className="bg-purple-500/20 backdrop-blur-sm rounded-2xl p-4 border border-purple-400/30">
                 <div className="flex items-center gap-3">
-                  <Building2 className="w-8 h-8 text-purple-400" />
+                  <Users className="w-8 h-8 text-purple-400" />
                   <div>
-                    <p className="text-purple-200 text-xs">Warehouses</p>
+                    <p className="text-purple-200 text-xs">Suppliers</p>
+                    <p className="text-2xl font-bold text-white">{suppliers.length}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-pink-500/20 backdrop-blur-sm rounded-2xl p-4 border border-pink-400/30">
+                <div className="flex items-center gap-3">
+                  <Building2 className="w-8 h-8 text-pink-400" />
+                  <div>
+                    <p className="text-pink-200 text-xs">Warehouses</p>
                     <p className="text-2xl font-bold text-white">FB1 & FB2</p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-teal-500/20 backdrop-blur-sm rounded-2xl p-4 border border-teal-400/30 cursor-pointer hover:bg-teal-500/30 transition-colors" onClick={() => { setActiveTab('reports'); fetchReports(); }}>
+                <div className="flex items-center gap-3">
+                  <BarChart3 className="w-8 h-8 text-teal-400" />
+                  <div>
+                    <p className="text-teal-200 text-xs">Reports</p>
+                    <p className="text-lg font-bold text-white">View →</p>
                   </div>
                 </div>
               </div>
@@ -516,7 +642,7 @@ export default function Home() {
                 value={originZip}
                 onChange={(e) => setOriginZip(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && searchInboundByOrigin()}
-                placeholder="e.g. 76107 (Fort Worth)"
+                placeholder="e.g. 92801 (Image Tech)"
                 className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 transition-colors text-gray-900"
               />
               <button
@@ -539,15 +665,30 @@ export default function Home() {
         {result && activeTab === 'search' && (
           <div className={`rounded-2xl shadow-xl p-6 mb-6 border-2 ${getResultColor()}`}>
             {/* Result Header */}
-            <div className="flex items-center gap-4 mb-4">
-              {result.type === 'inbound' && <ArrowDownToLine className="w-12 h-12 text-blue-600" />}
-              {result.type === 'outbound' && <ArrowUpFromLine className="w-12 h-12 text-green-600" />}
-              {result.type === 'both' && <Package className="w-12 h-12 text-purple-600" />}
-              {result.type === 'none' && <XCircle className="w-12 h-12 text-red-600" />}
-              <div>
-                <p className="text-2xl font-bold text-gray-800">{result.message}</p>
-                <p className="font-mono text-gray-600">{result.tracking}</p>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-4">
+                {result.type === 'inbound' && <ArrowDownToLine className="w-12 h-12 text-blue-600" />}
+                {result.type === 'outbound' && <ArrowUpFromLine className="w-12 h-12 text-green-600" />}
+                {result.type === 'both' && <Package className="w-12 h-12 text-purple-600" />}
+                {result.type === 'none' && <XCircle className="w-12 h-12 text-red-600" />}
+                <div>
+                  <p className="text-2xl font-bold text-gray-800">{result.message}</p>
+                  <p className="font-mono text-gray-600">{result.tracking}</p>
+                </div>
               </div>
+              {result.carrier && (
+                <button
+                  onClick={() => openTrackingModal(result.tracking, result.carrier!)}
+                  className={`px-4 py-2 rounded-lg font-semibold flex items-center gap-2 transition-colors ${
+                    result.carrier === 'UPS' 
+                      ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' 
+                      : 'bg-purple-100 text-purple-800 hover:bg-purple-200'
+                  }`}
+                >
+                  <Eye className="w-4 h-4" />
+                  Full Details
+                </button>
+              )}
             </div>
 
             <div className="grid md:grid-cols-2 gap-4">
@@ -617,27 +758,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Quantum View Data */}
-              {result.quantumView && (
-                <div className="bg-amber-100/50 rounded-xl p-4">
-                  <h3 className="font-bold text-amber-800 mb-2 flex items-center gap-2">
-                    <Truck className="w-5 h-5" /> Quantum View
-                  </h3>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <p className="text-amber-600 text-xs">Status</p>
-                      <p className="font-bold text-gray-800">{result.quantumView.status}</p>
-                    </div>
-                    <div>
-                      <p className="text-amber-600 text-xs">Origin</p>
-                      <p className="font-bold text-gray-800">
-                        {result.quantumView.origin?.city}, {result.quantumView.origin?.state}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* UPS Live Tracking */}
               {result.upsLive && (
                 <div className={`rounded-xl p-4 ${result.upsLive.isException ? 'bg-red-100/50' : 'bg-amber-100/50'}`}>
@@ -653,7 +773,7 @@ export default function Home() {
                     )}
                   </h3>
                   
-                  {/* Reference Numbers - Prominent Display */}
+                  {/* Reference Numbers */}
                   {(result.upsLive.poNumber || result.upsLive.invoiceNumber || result.upsLive.shipperReference) && (
                     <div className="bg-amber-200/50 rounded-lg p-2 mb-3 border border-amber-300">
                       <p className="text-amber-800 text-xs font-semibold mb-1">📋 Reference Info</p>
@@ -680,24 +800,6 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Shipper/Recipient Names */}
-                  {(result.upsLive.shipperName || result.upsLive.recipientName) && (
-                    <div className="grid grid-cols-2 gap-2 mb-3 text-sm">
-                      {result.upsLive.shipperName && (
-                        <div>
-                          <p className="text-amber-600 text-xs">From</p>
-                          <p className="font-bold text-gray-800">{result.upsLive.shipperName}</p>
-                        </div>
-                      )}
-                      {result.upsLive.recipientName && (
-                        <div>
-                          <p className="text-amber-600 text-xs">To</p>
-                          <p className="font-bold text-gray-800">{result.upsLive.recipientName}</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <p className="text-amber-600 text-xs">Status</p>
@@ -715,12 +817,6 @@ export default function Home() {
                         <p className="font-bold text-gray-800">{result.upsLive.service}</p>
                       </div>
                     )}
-                    {result.upsLive.estimatedDelivery && (
-                      <div>
-                        <p className="text-amber-600 text-xs">Est. Delivery</p>
-                        <p className="font-bold text-gray-800">{result.upsLive.estimatedDelivery}</p>
-                      </div>
-                    )}
                     {result.upsLive.deliveredAt && (
                       <div>
                         <p className="text-green-600 text-xs">Delivered</p>
@@ -728,16 +824,6 @@ export default function Home() {
                       </div>
                     )}
                   </div>
-                  {result.upsLive.events && result.upsLive.events.length > 0 && (
-                    <div className="border-t border-amber-200 pt-2 mt-2">
-                      <p className="text-amber-700 text-xs font-semibold mb-1">Recent Activity</p>
-                      {result.upsLive.events.slice(0, 3).map((event, idx) => (
-                        <div key={idx} className="text-xs text-gray-700">
-                          • {event.description} - {event.location}
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -756,7 +842,7 @@ export default function Home() {
                     )}
                   </h3>
 
-                  {/* Reference Numbers - Prominent Display */}
+                  {/* Reference Numbers */}
                   {(result.fedexLive.poNumber || result.fedexLive.invoiceNumber || result.fedexLive.shipperReference || result.fedexLive.customerReference) && (
                     <div className="bg-purple-200/50 rounded-lg p-2 mb-3 border border-purple-300">
                       <p className="text-purple-800 text-xs font-semibold mb-1">📋 Reference Info</p>
@@ -773,14 +859,8 @@ export default function Home() {
                             <span className="font-bold text-gray-900 ml-1">{result.fedexLive.invoiceNumber}</span>
                           </div>
                         )}
-                        {result.fedexLive.shipperReference && (
-                          <div>
-                            <span className="text-purple-700 text-xs">Shipper Ref:</span>
-                            <span className="font-bold text-gray-900 ml-1">{result.fedexLive.shipperReference}</span>
-                          </div>
-                        )}
                         {result.fedexLive.customerReference && (
-                          <div>
+                          <div className="col-span-2">
                             <span className="text-purple-700 text-xs">Customer Ref:</span>
                             <span className="font-bold text-gray-900 ml-1">{result.fedexLive.customerReference}</span>
                           </div>
@@ -789,59 +869,15 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Shipper/Recipient Names & Origin/Destination */}
-                  <div className="grid grid-cols-2 gap-2 mb-3 text-sm">
-                    {(result.fedexLive.shipperName || result.fedexLive.origin?.city) && (
-                      <div>
-                        <p className="text-purple-600 text-xs">From</p>
-                        <p className="font-bold text-gray-800">
-                          {result.fedexLive.shipperName || `${result.fedexLive.origin?.city}, ${result.fedexLive.origin?.state || result.fedexLive.origin?.country}`}
-                        </p>
-                        {result.fedexLive.shipperName && result.fedexLive.origin?.city && (
-                          <p className="text-gray-600 text-xs">{result.fedexLive.origin.city}, {result.fedexLive.origin.state || result.fedexLive.origin.country}</p>
-                        )}
-                      </div>
-                    )}
-                    {(result.fedexLive.recipientName || result.fedexLive.destination?.city) && (
-                      <div>
-                        <p className="text-purple-600 text-xs">To</p>
-                        <p className="font-bold text-gray-800">
-                          {result.fedexLive.recipientName || `${result.fedexLive.destination?.city}, ${result.fedexLive.destination?.state}`}
-                        </p>
-                        {result.fedexLive.recipientName && result.fedexLive.destination?.city && (
-                          <p className="text-gray-600 text-xs">{result.fedexLive.destination.city}, {result.fedexLive.destination.state}</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <p className="text-purple-600 text-xs">Status</p>
                       <p className="font-bold text-gray-800">{result.fedexLive.status}</p>
                     </div>
-                    {result.fedexLive.location && (
-                      <div>
-                        <p className="text-purple-600 text-xs">Last Location</p>
-                        <p className="font-bold text-gray-800">{result.fedexLive.location}</p>
-                      </div>
-                    )}
                     {result.fedexLive.service && (
                       <div>
                         <p className="text-purple-600 text-xs">Service</p>
                         <p className="font-bold text-gray-800">{result.fedexLive.service}</p>
-                      </div>
-                    )}
-                    {result.fedexLive.weight && (
-                      <div>
-                        <p className="text-purple-600 text-xs">Weight</p>
-                        <p className="font-bold text-gray-800">{result.fedexLive.weight} lbs</p>
-                      </div>
-                    )}
-                    {result.fedexLive.estimatedDelivery && !result.fedexLive.deliveredAt && (
-                      <div>
-                        <p className="text-purple-600 text-xs">Est. Delivery</p>
-                        <p className="font-bold text-gray-800">{result.fedexLive.estimatedDelivery}</p>
                       </div>
                     )}
                     {result.fedexLive.deliveredAt && (
@@ -857,176 +893,548 @@ export default function Home() {
                       </div>
                     )}
                   </div>
-                  {result.fedexLive.events && result.fedexLive.events.length > 0 && (
-                    <div className="border-t border-purple-200 pt-2 mt-2">
-                      <p className="text-purple-700 text-xs font-semibold mb-1">Recent Activity</p>
-                      {result.fedexLive.events.slice(0, 4).map((event, idx) => (
-                        <div key={idx} className="text-xs text-gray-700 flex items-start gap-1">
-                          <span className="text-purple-400">•</span>
-                          <span>{event.date} {event.time?.substring(0,5)} - {event.description}</span>
-                          {event.location && <span className="text-gray-500">({event.location})</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* Inbound Search Results */}
-        {activeTab === 'quantum' && inboundResults.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
-            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-              <MapPin className="w-5 h-5 text-amber-500" /> 
-              Inbound from ZIP: {originZip}
-              <span className="ml-2 px-2 py-1 bg-amber-100 text-amber-700 text-sm rounded-full">
-                {inboundResults.length} shipments
-              </span>
-            </h3>
-            <div className="space-y-2">
-              {inboundResults.map((ship, i) => (
-                <div 
-                  key={i}
-                  onClick={() => handleSearch(ship.tracking)}
-                  className="p-3 bg-amber-50 hover:bg-amber-100 rounded-xl cursor-pointer transition-colors"
-                >
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <p className="font-mono font-bold text-gray-800">{ship.tracking}</p>
-                      <p className="text-sm text-gray-600">From: {ship.origin}</p>
-                    </div>
-                    <div className="text-right">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        ship.status === 'DELIVERED' ? 'bg-green-100 text-green-700' :
-                        ship.status?.includes('EXCEPTION') ? 'bg-red-100 text-red-700' :
-                        'bg-blue-100 text-blue-700'
-                      }`}>
-                        {ship.status}
-                      </span>
-                      {ship.lastActivity && (
-                        <p className="text-xs text-gray-500 mt-1">{ship.lastActivity}</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Tab Navigation */}
         <div className="bg-white/10 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden">
-          <div className="flex border-b border-white/10">
+          <div className="flex border-b border-white/10 overflow-x-auto">
             <button
               onClick={() => setActiveTab('inbound')}
-              className={`flex-1 px-4 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm ${
+              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
                 activeTab === 'inbound' 
                   ? 'bg-blue-500/20 text-blue-300 border-b-2 border-blue-400' 
                   : 'text-white/60 hover:bg-white/5'
               }`}
             >
               <ArrowDownToLine className="w-4 h-4" />
-              Recent Inbound
+              Inbound
             </button>
             <button
               onClick={() => setActiveTab('outbound')}
-              className={`flex-1 px-4 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm ${
+              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
                 activeTab === 'outbound' 
                   ? 'bg-green-500/20 text-green-300 border-b-2 border-green-400' 
                   : 'text-white/60 hover:bg-white/5'
               }`}
             >
               <ArrowUpFromLine className="w-4 h-4" />
-              Recent Outbound
+              Outbound
             </button>
             <button
-              onClick={() => setActiveTab('quantum')}
-              className={`flex-1 px-4 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm ${
-                activeTab === 'quantum' 
-                  ? 'bg-amber-500/20 text-amber-300 border-b-2 border-amber-400' 
+              onClick={() => setActiveTab('suppliers')}
+              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
+                activeTab === 'suppliers' 
+                  ? 'bg-purple-500/20 text-purple-300 border-b-2 border-purple-400' 
                   : 'text-white/60 hover:bg-white/5'
               }`}
             >
-              <Truck className="w-4 h-4" />
-              Quantum View
+              <Users className="w-4 h-4" />
+              Suppliers
             </button>
             <button
               onClick={() => setActiveTab('batch')}
-              className={`flex-1 px-4 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm ${
+              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
                 activeTab === 'batch' 
                   ? 'bg-cyan-500/20 text-cyan-300 border-b-2 border-cyan-400' 
                   : 'text-white/60 hover:bg-white/5'
               }`}
             >
               <FileSpreadsheet className="w-4 h-4" />
-              Batch Track
+              Batch
+            </button>
+            <button
+              onClick={() => { setActiveTab('reports'); fetchReports(); }}
+              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
+                activeTab === 'reports' 
+                  ? 'bg-teal-500/20 text-teal-300 border-b-2 border-teal-400' 
+                  : 'text-white/60 hover:bg-white/5'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              Reports
+            </button>
+            <button
+              onClick={() => setActiveTab('quantum')}
+              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
+                activeTab === 'quantum' 
+                  ? 'bg-amber-500/20 text-amber-300 border-b-2 border-amber-400' 
+                  : 'text-white/60 hover:bg-white/5'
+              }`}
+            >
+              <Truck className="w-4 h-4" />
+              QV
             </button>
           </div>
 
-          <div className="p-4 max-h-96 overflow-y-auto">
+          <div className="p-4 max-h-[500px] overflow-y-auto">
+            {/* Inbound Tab */}
             {activeTab === 'inbound' && (
               <div className="space-y-2">
+                <div className="flex justify-between items-center mb-3">
+                  <p className="text-white/60 text-sm">Recent inbound scans</p>
+                  <button
+                    onClick={() => exportToCSV(recentScans, 'inbound-scans')}
+                    disabled={recentScans.length === 0}
+                    className="text-xs px-3 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 rounded-lg flex items-center gap-1"
+                  >
+                    <Download className="w-3 h-3" /> Export
+                  </button>
+                </div>
                 {recentScans.length === 0 ? (
                   <p className="text-white/40 text-center py-8">No recent inbound scans</p>
                 ) : (
                   recentScans.map((scan, i) => (
-                    <button
+                    <div
                       key={`${scan.tracking}-${i}`}
-                      onClick={() => handleSearch(scan.tracking)}
-                      className="w-full text-left p-3 bg-blue-500/10 hover:bg-blue-500/20 rounded-xl transition-colors"
+                      className="w-full text-left p-3 bg-blue-500/10 hover:bg-blue-500/20 rounded-xl transition-colors flex justify-between items-start"
                     >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="font-mono text-white text-sm">{scan.tracking}</p>
-                          {scan.po && <p className="text-blue-300 text-xs">PO: {scan.po}</p>}
-                        </div>
+                      <button onClick={() => handleSearch(scan.tracking)} className="text-left flex-1">
+                        <p className="font-mono text-white text-sm">{scan.tracking}</p>
+                        {scan.po && <p className="text-blue-300 text-xs">PO: {scan.po}</p>}
+                      </button>
+                      <div className="flex items-center gap-2">
                         <div className="text-right">
                           <p className="text-white/60 text-xs">{scan.timestamp}</p>
                           <span className="inline-block px-2 py-0.5 bg-blue-500/30 text-blue-300 text-xs rounded-full">
                             {scan.status}
                           </span>
                         </div>
+                        <button 
+                          onClick={() => openTrackingModal(scan.tracking, detectCarrier(scan.tracking))}
+                          className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg"
+                          title="View full details"
+                        >
+                          <Eye className="w-4 h-4 text-white/60" />
+                        </button>
                       </div>
-                    </button>
+                    </div>
                   ))
                 )}
               </div>
             )}
 
+            {/* Outbound Tab */}
             {activeTab === 'outbound' && (
               <div className="space-y-2">
+                <div className="flex justify-between items-center mb-3">
+                  <p className="text-white/60 text-sm">Recent outbound shipments</p>
+                  <button
+                    onClick={() => exportToCSV(recentOutbound, 'outbound-shipments')}
+                    disabled={recentOutbound.length === 0}
+                    className="text-xs px-3 py-1 bg-green-500/20 hover:bg-green-500/30 text-green-300 rounded-lg flex items-center gap-1"
+                  >
+                    <Download className="w-3 h-3" /> Export
+                  </button>
+                </div>
                 {recentOutbound.length === 0 ? (
                   <p className="text-white/40 text-center py-8">No recent outbound shipments</p>
                 ) : (
                   recentOutbound.map((ship, i) => (
-                    <button
+                    <div
                       key={`${ship.tracking}-${i}`}
-                      onClick={() => handleSearch(ship.tracking)}
-                      className="w-full text-left p-3 bg-green-500/10 hover:bg-green-500/20 rounded-xl transition-colors"
+                      className="w-full text-left p-3 bg-green-500/10 hover:bg-green-500/20 rounded-xl transition-colors flex justify-between items-start"
                     >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="font-mono text-white text-sm">{ship.tracking}</p>
-                          <p className="text-green-300 text-xs">To: {ship.recipient}</p>
-                        </div>
+                      <button onClick={() => handleSearch(ship.tracking)} className="text-left flex-1">
+                        <p className="font-mono text-white text-sm">{ship.tracking}</p>
+                        <p className="text-green-300 text-xs">To: {ship.recipient}</p>
+                      </button>
+                      <div className="flex items-center gap-2">
                         <div className="text-right">
                           <span className="inline-block px-2 py-0.5 bg-green-500/30 text-green-300 text-xs rounded-full">
                             {ship.location}
                           </span>
                           <p className="text-white/60 text-xs mt-1">{ship.service}</p>
                         </div>
+                        <button 
+                          onClick={() => openTrackingModal(ship.tracking, detectCarrier(ship.tracking))}
+                          className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg"
+                          title="View full details"
+                        >
+                          <Eye className="w-4 h-4 text-white/60" />
+                        </button>
                       </div>
-                    </button>
+                    </div>
                   ))
                 )}
               </div>
             )}
 
+            {/* Suppliers Tab */}
+            {activeTab === 'suppliers' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-white font-semibold flex items-center gap-2">
+                    <Users className="w-5 h-5 text-purple-400" />
+                    Supplier Directory
+                  </h3>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  {suppliers.map(supplier => (
+                    <div
+                      key={supplier.id}
+                      className={`p-4 rounded-xl border-2 transition-all cursor-pointer ${
+                        selectedSupplier === supplier.id
+                          ? 'bg-purple-500/20 border-purple-400'
+                          : 'bg-white/5 border-white/10 hover:bg-white/10'
+                      }`}
+                      onClick={() => fetchSupplierShipments(supplier.id)}
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <h4 className="font-bold text-white">{supplier.name}</h4>
+                          <p className="text-white/60 text-sm">{supplier.city}, {supplier.state}</p>
+                        </div>
+                        <a
+                          href={supplier.website}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg"
+                        >
+                          <ExternalLink className="w-4 h-4 text-white/60" />
+                        </a>
+                      </div>
+                      <p className="text-xs text-purple-300 mb-2">{supplier.category}</p>
+                      <div className="flex flex-wrap gap-1">
+                        {supplier.zipCodes.slice(0, 3).map(zip => (
+                          <span key={zip} className="px-2 py-0.5 bg-white/10 text-white/70 text-xs rounded-full font-mono">
+                            {zip}
+                          </span>
+                        ))}
+                        {supplier.zipCodes.length > 3 && (
+                          <span className="px-2 py-0.5 bg-white/10 text-white/50 text-xs rounded-full">
+                            +{supplier.zipCodes.length - 3} more
+                          </span>
+                        )}
+                      </div>
+                      {supplier.contact?.phone && (
+                        <p className="text-white/50 text-xs mt-2">📞 {supplier.contact.phone}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Supplier Shipments */}
+                {selectedSupplier && (
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-white font-semibold">
+                        Shipments from {suppliers.find(s => s.id === selectedSupplier)?.name}
+                      </h4>
+                      {supplierLoading && <Loader2 className="w-4 h-4 text-white animate-spin" />}
+                    </div>
+                    
+                    {supplierShipments.length === 0 ? (
+                      <p className="text-white/40 text-center py-4">
+                        {supplierLoading ? 'Loading shipments...' : 'No recent shipments found from this supplier'}
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {supplierShipments.map((ship, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleSearch(ship.tracking)}
+                            className="w-full text-left p-3 bg-purple-500/10 hover:bg-purple-500/20 rounded-xl transition-colors"
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                    ship.carrier === 'UPS' ? 'bg-amber-600 text-white' : 'bg-purple-600 text-white'
+                                  }`}>
+                                    {ship.carrier}
+                                  </span>
+                                  <p className="font-mono text-white text-sm">{ship.tracking}</p>
+                                </div>
+                                {ship.poNumber && <p className="text-purple-300 text-xs mt-1">PO: {ship.poNumber}</p>}
+                              </div>
+                              <span className={`px-2 py-0.5 rounded-full text-xs ${
+                                ship.statusDescription?.toLowerCase().includes('delivered')
+                                  ? 'bg-green-500/30 text-green-300'
+                                  : ship.isException
+                                  ? 'bg-red-500/30 text-red-300'
+                                  : 'bg-blue-500/30 text-blue-300'
+                              }`}>
+                                {ship.statusDescription || ship.status}
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Batch Tracking Tab */}
+            {activeTab === 'batch' && (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-white text-sm font-semibold">
+                      Paste tracking numbers (one per line or comma-separated)
+                    </label>
+                    <span className="text-white/40 text-xs">Max 50</span>
+                  </div>
+                  <textarea
+                    value={batchInput}
+                    onChange={(e) => setBatchInput(e.target.value)}
+                    placeholder="1Z90A10R0306936706&#10;886094855396&#10;1Z90A10R0307410478"
+                    className="w-full h-32 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/30 focus:outline-none focus:border-cyan-400 font-mono text-sm"
+                  />
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={handleBatchTrack}
+                      disabled={batchLoading || !batchInput.trim()}
+                      className="flex-1 px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 disabled:from-gray-500 disabled:to-gray-500 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+                    >
+                      {batchLoading ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <Play className="w-5 h-5" />
+                      )}
+                      {batchLoading ? 'Tracking...' : 'Track All'}
+                    </button>
+                    {batchResults.length > 0 && (
+                      <button
+                        onClick={() => exportToCSV(batchResults, 'batch-tracking')}
+                        className="px-4 py-3 bg-green-500/20 hover:bg-green-500/30 text-green-300 font-semibold rounded-xl transition-colors flex items-center gap-2"
+                      >
+                        <Download className="w-5 h-5" />
+                        Export CSV
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {batchStats && (
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    <div className="bg-emerald-500/20 rounded-lg p-2">
+                      <p className="text-emerald-300 text-xs">Delivered</p>
+                      <p className="text-xl font-bold text-white">{batchStats.delivered}</p>
+                    </div>
+                    <div className="bg-cyan-500/20 rounded-lg p-2">
+                      <p className="text-cyan-300 text-xs">In Transit</p>
+                      <p className="text-xl font-bold text-white">{batchStats.inTransit}</p>
+                    </div>
+                    <div className="bg-red-500/20 rounded-lg p-2">
+                      <p className="text-red-300 text-xs">Exceptions</p>
+                      <p className="text-xl font-bold text-white">{batchStats.exceptions}</p>
+                    </div>
+                    <div className="bg-gray-500/20 rounded-lg p-2">
+                      <p className="text-gray-300 text-xs">Unknown</p>
+                      <p className="text-xl font-bold text-white">{batchStats.unknown}</p>
+                    </div>
+                  </div>
+                )}
+
+                {batchResults.length > 0 && (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {batchResults.map((result, i) => (
+                      <div
+                        key={i}
+                        className={`w-full text-left p-3 rounded-xl transition-colors flex justify-between items-start ${
+                          result.statusDescription?.toLowerCase().includes('delivered')
+                            ? 'bg-emerald-500/10 hover:bg-emerald-500/20'
+                            : result.isException
+                            ? 'bg-red-500/10 hover:bg-red-500/20'
+                            : 'bg-cyan-500/10 hover:bg-cyan-500/20'
+                        }`}
+                      >
+                        <button onClick={() => handleSearch(result.tracking)} className="text-left flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                              result.carrier === 'UPS' ? 'bg-amber-600 text-white' : 'bg-purple-600 text-white'
+                            }`}>
+                              {result.carrier}
+                            </span>
+                            <p className="font-mono text-white text-sm">{result.tracking}</p>
+                          </div>
+                          <p className="text-white/60 text-xs mt-1">
+                            {result.origin} → {result.destination}
+                          </p>
+                        </button>
+                        <div className="flex items-center gap-2">
+                          <div className="text-right">
+                            <span className={`px-2 py-0.5 rounded-full text-xs ${
+                              result.statusDescription?.toLowerCase().includes('delivered')
+                                ? 'bg-emerald-500/30 text-emerald-300'
+                                : result.isException
+                                ? 'bg-red-500/30 text-red-300'
+                                : 'bg-cyan-500/30 text-cyan-300'
+                            }`}>
+                              {result.statusDescription}
+                            </span>
+                          </div>
+                          <button 
+                            onClick={() => openTrackingModal(result.tracking, result.carrier as 'UPS' | 'FedEx')}
+                            className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg"
+                            title="View full details"
+                          >
+                            <Eye className="w-4 h-4 text-white/60" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!batchLoading && batchResults.length === 0 && (
+                  <div className="text-center py-8">
+                    <FileSpreadsheet className="w-12 h-12 text-white/20 mx-auto mb-3" />
+                    <p className="text-white/40">Paste tracking numbers above</p>
+                    <p className="text-white/30 text-sm mt-2">Track up to 50 packages at once • UPS & FedEx supported</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Reports Tab */}
+            {activeTab === 'reports' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-white font-semibold flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-teal-400" />
+                    Shipment Reports
+                  </h3>
+                  <button
+                    onClick={fetchReports}
+                    disabled={reportLoading}
+                    className="px-3 py-1.5 bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 rounded-lg text-xs font-semibold flex items-center gap-1"
+                  >
+                    {reportLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                    Refresh
+                  </button>
+                </div>
+
+                {reportLoading && !reportData ? (
+                  <div className="text-center py-12">
+                    <Loader2 className="w-8 h-8 text-white/40 animate-spin mx-auto" />
+                    <p className="text-white/40 mt-3">Loading reports...</p>
+                  </div>
+                ) : reportData ? (
+                  <>
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-blue-500/20 rounded-xl p-4 text-center">
+                        <p className="text-blue-300 text-xs">Total Inbound</p>
+                        <p className="text-2xl font-bold text-white">{reportData.summary.totalInbound.toLocaleString()}</p>
+                      </div>
+                      <div className="bg-green-500/20 rounded-xl p-4 text-center">
+                        <p className="text-green-300 text-xs">Total Outbound</p>
+                        <p className="text-2xl font-bold text-white">{reportData.summary.totalOutbound.toLocaleString()}</p>
+                      </div>
+                      <div className="bg-amber-500/20 rounded-xl p-4 text-center">
+                        <p className="text-amber-300 text-xs">Today Inbound</p>
+                        <p className="text-2xl font-bold text-white">{reportData.summary.todayInbound}</p>
+                      </div>
+                      <div className="bg-purple-500/20 rounded-xl p-4 text-center">
+                        <p className="text-purple-300 text-xs">Today Outbound</p>
+                        <p className="text-2xl font-bold text-white">{reportData.summary.todayOutbound}</p>
+                      </div>
+                    </div>
+
+                    {/* Daily Trend Chart */}
+                    <div className="bg-white/5 rounded-xl p-4">
+                      <h4 className="text-white font-semibold mb-4 flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4 text-teal-400" />
+                        7-Day Trend
+                      </h4>
+                      <div className="flex items-end gap-2 h-40">
+                        {reportData.dailyStats.map((day, i) => {
+                          const maxVal = Math.max(
+                            ...reportData.dailyStats.map(d => Math.max(d.inboundCount, d.outboundCount))
+                          ) || 1;
+                          const inboundHeight = (day.inboundCount / maxVal) * 100;
+                          const outboundHeight = (day.outboundCount / maxVal) * 100;
+                          
+                          return (
+                            <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                              <div className="flex gap-1 items-end h-28 w-full">
+                                <div 
+                                  className="flex-1 bg-blue-500/60 rounded-t transition-all"
+                                  style={{ height: `${inboundHeight}%` }}
+                                  title={`Inbound: ${day.inboundCount}`}
+                                />
+                                <div 
+                                  className="flex-1 bg-green-500/60 rounded-t transition-all"
+                                  style={{ height: `${outboundHeight}%` }}
+                                  title={`Outbound: ${day.outboundCount}`}
+                                />
+                              </div>
+                              <p className="text-white/40 text-xs">
+                                {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex justify-center gap-6 mt-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 bg-blue-500/60 rounded" />
+                          <span className="text-white/60 text-xs">Inbound</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 bg-green-500/60 rounded" />
+                          <span className="text-white/60 text-xs">Outbound</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Performance Metrics */}
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-white/5 rounded-xl p-4 text-center">
+                        <p className="text-white/60 text-xs">Avg Daily Inbound</p>
+                        <p className="text-xl font-bold text-white">{reportData.performance.avgDailyInbound}</p>
+                      </div>
+                      <div className="bg-white/5 rounded-xl p-4 text-center">
+                        <p className="text-white/60 text-xs">Avg Daily Outbound</p>
+                        <p className="text-xl font-bold text-white">{reportData.performance.avgDailyOutbound}</p>
+                      </div>
+                      <div className="bg-white/5 rounded-xl p-4 text-center">
+                        <p className="text-white/60 text-xs">Exceptions Today</p>
+                        <p className={`text-xl font-bold ${reportData.performance.exceptionsToday > 0 ? 'text-red-400' : 'text-green-400'}`}>
+                          {reportData.performance.exceptionsToday}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Export Button */}
+                    <div className="flex justify-center">
+                      <button
+                        onClick={async () => {
+                          const res = await fetch('/api/reports?action=export&format=csv');
+                          const blob = await res.blob();
+                          const link = document.createElement('a');
+                          link.href = URL.createObjectURL(blob);
+                          link.download = `shipment-report-${new Date().toISOString().split('T')[0]}.csv`;
+                          link.click();
+                        }}
+                        className="px-4 py-2 bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 rounded-xl flex items-center gap-2"
+                      >
+                        <Download className="w-4 h-4" />
+                        Export Full Report (CSV)
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-12">
+                    <BarChart3 className="w-12 h-12 text-white/20 mx-auto mb-3" />
+                    <p className="text-white/40">Click refresh to load reports</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Quantum View Tab */}
             {activeTab === 'quantum' && (
               <div className="space-y-4">
-                {/* Refresh Button & Stats */}
                 <div className="flex items-center justify-between">
                   <div className="flex gap-2">
                     <button
@@ -1068,330 +1476,50 @@ export default function Home() {
                     className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1"
                   >
                     {qvLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                    Refresh from UPS
+                    Refresh
                   </button>
                 </div>
 
-                {/* Stats Row */}
-                <div className="grid grid-cols-4 gap-2">
-                  <div className="bg-blue-500/20 rounded-lg p-2 text-center">
-                    <p className="text-blue-300 text-xs">Inbound</p>
-                    <p className="text-xl font-bold text-white">{qvData.inbound.length}</p>
-                  </div>
-                  <div className="bg-green-500/20 rounded-lg p-2 text-center">
-                    <p className="text-green-300 text-xs">Outbound</p>
-                    <p className="text-xl font-bold text-white">{qvData.outbound.length}</p>
-                  </div>
-                  <div className="bg-amber-500/20 rounded-lg p-2 text-center">
-                    <p className="text-amber-300 text-xs">Arriving Today</p>
-                    <p className="text-xl font-bold text-white">{qvData.arrivingToday.length}</p>
-                  </div>
-                  <div className="bg-red-500/20 rounded-lg p-2 text-center">
-                    <p className="text-red-300 text-xs">Exceptions</p>
-                    <p className="text-xl font-bold text-white">{qvData.exceptions.length}</p>
-                  </div>
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-center">
+                  <p className="text-amber-300 text-sm">
+                    ⏳ UPS Quantum View Download (QVD) activation pending
+                  </p>
+                  <p className="text-amber-200/60 text-xs mt-1">
+                    Contact UPS to activate CompanyQVD and UserQVD for API access
+                  </p>
                 </div>
 
-                {/* Shipment List Based on Sub-Tab */}
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {qvSubTab === 'inbound' && (
-                    qvData.inbound.length === 0 ? (
-                      <div className="text-center py-6">
-                        <p className="text-white/40">No inbound shipments. Click "Refresh from UPS" to load.</p>
-                      </div>
-                    ) : (
-                      qvData.inbound.map((ship, i) => (
+                {qvSubTab === 'inbound' && (
+                  qvData.inbound.length === 0 ? (
+                    <div className="text-center py-6">
+                      <p className="text-white/40">No inbound shipments from Quantum View yet</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {qvData.inbound.map((ship, i) => (
                         <button
                           key={i}
                           onClick={() => handleSearch(ship.trackingNumber)}
                           className="w-full text-left p-3 bg-blue-500/10 hover:bg-blue-500/20 rounded-xl transition-colors"
                         >
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
-                              <p className="text-blue-300 text-xs">From: {ship.shipperName || ship.shipperAddress}</p>
-                              <p className="text-white/50 text-xs">To: FB1/FB2 • {ship.recipientAddress}</p>
-                            </div>
-                            <div className="text-right">
-                              <span className="px-2 py-0.5 bg-blue-500/30 text-blue-300 text-xs rounded-full">
-                                {ship.status}
-                              </span>
-                              {ship.scheduledDelivery && (
-                                <p className="text-white/50 text-xs mt-1">ETA: {ship.scheduledDelivery}</p>
-                              )}
-                            </div>
-                          </div>
-                        </button>
-                      ))
-                    )
-                  )}
-                  
-                  {qvSubTab === 'outbound' && (
-                    qvData.outbound.length === 0 ? (
-                      <div className="text-center py-6">
-                        <p className="text-white/40">No outbound shipments. Click "Refresh from UPS" to load.</p>
-                      </div>
-                    ) : (
-                      qvData.outbound.map((ship, i) => (
-                        <button
-                          key={i}
-                          onClick={() => handleSearch(ship.trackingNumber)}
-                          className="w-full text-left p-3 bg-green-500/10 hover:bg-green-500/20 rounded-xl transition-colors"
-                        >
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
-                              <p className="text-green-300 text-xs">To: {ship.recipientName || ship.recipientAddress}</p>
-                            </div>
-                            <div className="text-right">
-                              <span className="px-2 py-0.5 bg-green-500/30 text-green-300 text-xs rounded-full">
-                                {ship.status}
-                              </span>
-                              {ship.scheduledDelivery && (
-                                <p className="text-white/50 text-xs mt-1">ETA: {ship.scheduledDelivery}</p>
-                              )}
-                            </div>
-                          </div>
-                        </button>
-                      ))
-                    )
-                  )}
-                  
-                  {qvSubTab === 'arriving' && (
-                    qvData.arrivingToday.length === 0 ? (
-                      <div className="text-center py-6">
-                        <p className="text-white/40">No packages arriving today.</p>
-                      </div>
-                    ) : (
-                      qvData.arrivingToday.map((ship, i) => (
-                        <button
-                          key={i}
-                          onClick={() => handleSearch(ship.trackingNumber)}
-                          className="w-full text-left p-3 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition-colors"
-                        >
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
-                              <p className="text-amber-300 text-xs">From: {ship.shipperName || ship.shipperAddress}</p>
-                            </div>
-                            <span className="px-2 py-0.5 bg-amber-500/30 text-amber-300 text-xs rounded-full">
-                              🚚 Arriving Today
-                            </span>
-                          </div>
-                        </button>
-                      ))
-                    )
-                  )}
-                  
-                  {qvSubTab === 'exceptions' && (
-                    qvData.exceptions.length === 0 ? (
-                      <div className="text-center py-6">
-                        <p className="text-white/40">✅ No exceptions - all shipments on track!</p>
-                      </div>
-                    ) : (
-                      qvData.exceptions.map((ship, i) => (
-                        <button
-                          key={i}
-                          onClick={() => handleSearch(ship.trackingNumber)}
-                          className="w-full text-left p-3 bg-red-500/10 hover:bg-red-500/20 rounded-xl transition-colors"
-                        >
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
-                              <p className="text-red-300 text-xs">{ship.shipperName || ship.shipperAddress}</p>
-                            </div>
-                            <span className="px-2 py-0.5 bg-red-500/30 text-red-300 text-xs rounded-full">
-                              ⚠️ {ship.status}
-                            </span>
-                          </div>
-                        </button>
-                      ))
-                    )
-                  )}
-                </div>
-
-                {/* Legacy inbound results */}
-                {inboundResults.length > 0 && (
-                  <div className="border-t border-white/10 pt-4">
-                    <p className="text-white/60 text-xs mb-2">Origin ZIP Search Results:</p>
-                    <div className="space-y-2">
-                      {inboundResults.map((ship, i) => (
-                        <button
-                          key={i}
-                          onClick={() => handleSearch(ship.tracking)}
-                          className="w-full text-left p-3 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition-colors"
-                        >
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <p className="font-mono text-white text-sm">{ship.tracking}</p>
-                              <p className="text-amber-300 text-xs">From: {ship.origin}</p>
-                            </div>
-                            <span className="px-2 py-0.5 bg-amber-500/30 text-amber-300 text-xs rounded-full">
-                              {ship.status}
-                            </span>
-                          </div>
+                          <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                          <p className="text-blue-300 text-xs">From: {ship.shipperName || ship.shipperAddress}</p>
                         </button>
                       ))}
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Batch Tracking Tab */}
-            {activeTab === 'batch' && (
-              <div className="space-y-4">
-                {/* Batch Input */}
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="text-white text-sm font-semibold">
-                      Paste tracking numbers (one per line or comma-separated)
-                    </label>
-                    <span className="text-white/40 text-xs">Max 50</span>
-                  </div>
-                  <textarea
-                    value={batchInput}
-                    onChange={(e) => setBatchInput(e.target.value)}
-                    placeholder="1Z90A10R0306936706&#10;886094855396&#10;1Z90A10R0307410478"
-                    className="w-full h-32 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/30 focus:outline-none focus:border-cyan-400 font-mono text-sm"
-                  />
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={handleBatchTrack}
-                      disabled={batchLoading || !batchInput.trim()}
-                      className="flex-1 px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 disabled:from-gray-500 disabled:to-gray-500 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
-                    >
-                      {batchLoading ? (
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                      ) : (
-                        <Play className="w-5 h-5" />
-                      )}
-                      {batchLoading ? 'Tracking...' : 'Track All'}
-                    </button>
-                    {batchResults.length > 0 && (
-                      <button
-                        onClick={() => exportToCSV(batchResults, 'batch-tracking')}
-                        className="px-4 py-3 bg-green-500/20 hover:bg-green-500/30 text-green-300 font-semibold rounded-xl transition-colors flex items-center gap-2"
-                      >
-                        <Download className="w-5 h-5" />
-                        Export CSV
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Batch Results */}
-                {batchStats && (
-                  <div className="grid grid-cols-4 gap-2 text-center">
-                    <div className="bg-emerald-500/20 rounded-lg p-2">
-                      <p className="text-emerald-300 text-xs">Delivered</p>
-                      <p className="text-xl font-bold text-white">{batchStats.delivered}</p>
-                    </div>
-                    <div className="bg-cyan-500/20 rounded-lg p-2">
-                      <p className="text-cyan-300 text-xs">In Transit</p>
-                      <p className="text-xl font-bold text-white">{batchStats.inTransit}</p>
-                    </div>
-                    <div className="bg-red-500/20 rounded-lg p-2">
-                      <p className="text-red-300 text-xs">Exceptions</p>
-                      <p className="text-xl font-bold text-white">{batchStats.exceptions}</p>
-                    </div>
-                    <div className="bg-gray-500/20 rounded-lg p-2">
-                      <p className="text-gray-300 text-xs">Unknown</p>
-                      <p className="text-xl font-bold text-white">{batchStats.unknown}</p>
-                    </div>
-                  </div>
-                )}
-
-                {batchResults.length > 0 && (
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {batchResults.map((result, i) => (
-                      <button
-                        key={i}
-                        onClick={() => handleSearch(result.tracking)}
-                        className={`w-full text-left p-3 rounded-xl transition-colors ${
-                          result.statusDescription?.toLowerCase().includes('delivered')
-                            ? 'bg-emerald-500/10 hover:bg-emerald-500/20'
-                            : result.isException
-                            ? 'bg-red-500/10 hover:bg-red-500/20'
-                            : 'bg-cyan-500/10 hover:bg-cyan-500/20'
-                        }`}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className={`text-xs px-1.5 py-0.5 rounded ${
-                                result.carrier === 'UPS' ? 'bg-amber-600 text-white' : 'bg-purple-600 text-white'
-                              }`}>
-                                {result.carrier}
-                              </span>
-                              <p className="font-mono text-white text-sm">{result.tracking}</p>
-                            </div>
-                            <p className="text-white/60 text-xs mt-1">
-                              {result.origin} → {result.destination}
-                            </p>
-                            {result.poNumber && (
-                              <p className="text-cyan-300 text-xs">PO: {result.poNumber}</p>
-                            )}
-                          </div>
-                          <div className="text-right">
-                            <span className={`px-2 py-0.5 rounded-full text-xs ${
-                              result.statusDescription?.toLowerCase().includes('delivered')
-                                ? 'bg-emerald-500/30 text-emerald-300'
-                                : result.isException
-                                ? 'bg-red-500/30 text-red-300'
-                                : 'bg-cyan-500/30 text-cyan-300'
-                            }`}>
-                              {result.statusDescription}
-                            </span>
-                            {result.deliveredAt && (
-                              <p className="text-emerald-300 text-xs mt-1">{result.deliveredAt}</p>
-                            )}
-                            {result.signedBy && (
-                              <p className="text-white/50 text-xs">Signed: {result.signedBy}</p>
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {!batchLoading && batchResults.length === 0 && (
-                  <div className="text-center py-8">
-                    <FileSpreadsheet className="w-12 h-12 text-white/20 mx-auto mb-3" />
-                    <p className="text-white/40">Paste tracking numbers above</p>
-                    <p className="text-white/30 text-sm mt-2">Track up to 50 packages at once • UPS & FedEx supported</p>
-                  </div>
+                  )
                 )}
               </div>
             )}
           </div>
         </div>
-
-        {/* Export Buttons */}
-        <div className="flex justify-center gap-4 mt-6">
-          <button
-            onClick={() => exportToCSV(recentScans, 'inbound-scans')}
-            disabled={recentScans.length === 0}
-            className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 disabled:bg-gray-500/10 disabled:text-gray-500 text-blue-300 rounded-xl transition-colors flex items-center gap-2 text-sm"
-          >
-            <Download className="w-4 h-4" />
-            Export Inbound CSV
-          </button>
-          <button
-            onClick={() => exportToCSV(recentOutbound, 'outbound-shipments')}
-            disabled={recentOutbound.length === 0}
-            className="px-4 py-2 bg-green-500/20 hover:bg-green-500/30 disabled:bg-gray-500/10 disabled:text-gray-500 text-green-300 rounded-xl transition-colors flex items-center gap-2 text-sm"
-          >
-            <Download className="w-4 h-4" />
-            Export Outbound CSV
-          </button>
-        </div>
       </main>
 
       <footer className="text-center py-4 text-white/40 text-sm border-t border-white/10 mt-8">
         <p>Promos Ink Supply Chain Platform • FB1 & FB2 Warehouses • Dallas, TX</p>
-        <p className="text-xs mt-1">Inbound scans sync every 5 min • UPS Quantum View • Real-time tracking</p>
+        <p className="text-xs mt-1">
+          Suppliers: Image Technology • Grimco • Nazdar SourceOne • Kornit Digital
+        </p>
       </footer>
     </div>
   );
