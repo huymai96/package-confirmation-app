@@ -126,6 +126,26 @@ interface QVStats {
   totalShipments: number;
 }
 
+interface QVShipment {
+  trackingNumber: string;
+  shipperName: string;
+  shipperAddress: string;
+  recipientName: string;
+  recipientAddress: string;
+  scheduledDelivery: string;
+  status: string;
+  direction: 'inbound' | 'outbound' | 'thirdparty';
+  accountNumber: string;
+}
+
+interface QVData {
+  inbound: QVShipment[];
+  outbound: QVShipment[];
+  thirdParty: QVShipment[];
+  arrivingToday: QVShipment[];
+  exceptions: QVShipment[];
+}
+
 interface BatchResult {
   tracking: string;
   carrier: string;
@@ -170,6 +190,11 @@ export default function Home() {
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
   const [batchStats, setBatchStats] = useState<BatchStats | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
+  
+  // Quantum View state
+  const [qvData, setQvData] = useState<QVData>({ inbound: [], outbound: [], thirdParty: [], arrivingToday: [], exceptions: [] });
+  const [qvLoading, setQvLoading] = useState(false);
+  const [qvSubTab, setQvSubTab] = useState<'inbound' | 'outbound' | 'arriving' | 'exceptions'>('inbound');
 
   useEffect(() => {
     fetchRecent();
@@ -230,6 +255,39 @@ export default function Home() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Refresh Quantum View data from UPS
+  const refreshQuantumView = async () => {
+    setQvLoading(true);
+    try {
+      const [allRes, arrivingRes, exceptionsRes] = await Promise.all([
+        fetch('/api/quantum-view?action=all'),
+        fetch('/api/quantum-view?action=arriving-today'),
+        fetch('/api/quantum-view?action=exceptions')
+      ]);
+      
+      const allData = await allRes.json();
+      const arrivingData = await arrivingRes.json();
+      const exceptionsData = await exceptionsRes.json();
+      
+      setQvData({
+        inbound: allData.inbound?.shipments || [],
+        outbound: allData.outbound?.shipments || [],
+        thirdParty: [], // Will add if available
+        arrivingToday: arrivingData.shipments || [],
+        exceptions: exceptionsData.shipments || []
+      });
+      
+      setQvStats({
+        totalEvents: (allData.inbound?.count || 0) + (allData.outbound?.count || 0),
+        totalShipments: allData.total || 0
+      });
+    } catch (error) {
+      console.error('Quantum View refresh error:', error);
+    } finally {
+      setQvLoading(false);
     }
   };
 
@@ -322,6 +380,8 @@ export default function Home() {
             <button 
               onClick={() => { fetchRecent(); fetchStats(); fetchQVStats(); }}
               className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+              title="Refresh data"
+              aria-label="Refresh data"
             >
               <RefreshCw className="w-5 h-5 text-white" />
             </button>
@@ -966,46 +1026,214 @@ export default function Home() {
 
             {activeTab === 'quantum' && (
               <div className="space-y-4">
-                {qvStats.totalShipments === 0 && inboundResults.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Truck className="w-12 h-12 text-white/20 mx-auto mb-3" />
-                    <p className="text-white/40">Waiting for UPS Quantum View events...</p>
-                    <p className="text-white/30 text-sm mt-2">Events will appear when UPS sends shipment updates</p>
+                {/* Refresh Button & Stats */}
+                <div className="flex items-center justify-between">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setQvSubTab('inbound')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        qvSubTab === 'inbound' ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                      }`}
+                    >
+                      📥 Inbound ({qvData.inbound.length})
+                    </button>
+                    <button
+                      onClick={() => setQvSubTab('outbound')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        qvSubTab === 'outbound' ? 'bg-green-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                      }`}
+                    >
+                      📤 Outbound ({qvData.outbound.length})
+                    </button>
+                    <button
+                      onClick={() => setQvSubTab('arriving')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        qvSubTab === 'arriving' ? 'bg-amber-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                      }`}
+                    >
+                      🚚 Today ({qvData.arrivingToday.length})
+                    </button>
+                    <button
+                      onClick={() => setQvSubTab('exceptions')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        qvSubTab === 'exceptions' ? 'bg-red-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                      }`}
+                    >
+                      ⚠️ Exceptions ({qvData.exceptions.length})
+                    </button>
                   </div>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="bg-amber-500/20 rounded-xl p-3">
-                        <p className="text-amber-300 text-xs">Total Events</p>
-                        <p className="text-2xl font-bold text-white">{qvStats.totalEvents}</p>
+                  <button
+                    onClick={refreshQuantumView}
+                    disabled={qvLoading}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1"
+                  >
+                    {qvLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                    Refresh from UPS
+                  </button>
+                </div>
+
+                {/* Stats Row */}
+                <div className="grid grid-cols-4 gap-2">
+                  <div className="bg-blue-500/20 rounded-lg p-2 text-center">
+                    <p className="text-blue-300 text-xs">Inbound</p>
+                    <p className="text-xl font-bold text-white">{qvData.inbound.length}</p>
+                  </div>
+                  <div className="bg-green-500/20 rounded-lg p-2 text-center">
+                    <p className="text-green-300 text-xs">Outbound</p>
+                    <p className="text-xl font-bold text-white">{qvData.outbound.length}</p>
+                  </div>
+                  <div className="bg-amber-500/20 rounded-lg p-2 text-center">
+                    <p className="text-amber-300 text-xs">Arriving Today</p>
+                    <p className="text-xl font-bold text-white">{qvData.arrivingToday.length}</p>
+                  </div>
+                  <div className="bg-red-500/20 rounded-lg p-2 text-center">
+                    <p className="text-red-300 text-xs">Exceptions</p>
+                    <p className="text-xl font-bold text-white">{qvData.exceptions.length}</p>
+                  </div>
+                </div>
+
+                {/* Shipment List Based on Sub-Tab */}
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {qvSubTab === 'inbound' && (
+                    qvData.inbound.length === 0 ? (
+                      <div className="text-center py-6">
+                        <p className="text-white/40">No inbound shipments. Click "Refresh from UPS" to load.</p>
                       </div>
-                      <div className="bg-amber-500/20 rounded-xl p-3">
-                        <p className="text-amber-300 text-xs">Tracked Shipments</p>
-                        <p className="text-2xl font-bold text-white">{qvStats.totalShipments}</p>
-                      </div>
-                    </div>
-                    {inboundResults.length > 0 && (
-                      <div className="space-y-2">
-                        {inboundResults.map((ship, i) => (
-                          <button
-                            key={i}
-                            onClick={() => handleSearch(ship.tracking)}
-                            className="w-full text-left p-3 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition-colors"
-                          >
-                            <div className="flex justify-between items-start">
-                              <div>
-                                <p className="font-mono text-white text-sm">{ship.tracking}</p>
-                                <p className="text-amber-300 text-xs">From: {ship.origin}</p>
-                              </div>
-                              <span className="px-2 py-0.5 bg-amber-500/30 text-amber-300 text-xs rounded-full">
+                    ) : (
+                      qvData.inbound.map((ship, i) => (
+                        <button
+                          key={i}
+                          onClick={() => handleSearch(ship.trackingNumber)}
+                          className="w-full text-left p-3 bg-blue-500/10 hover:bg-blue-500/20 rounded-xl transition-colors"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                              <p className="text-blue-300 text-xs">From: {ship.shipperName || ship.shipperAddress}</p>
+                              <p className="text-white/50 text-xs">To: FB1/FB2 • {ship.recipientAddress}</p>
+                            </div>
+                            <div className="text-right">
+                              <span className="px-2 py-0.5 bg-blue-500/30 text-blue-300 text-xs rounded-full">
                                 {ship.status}
                               </span>
+                              {ship.scheduledDelivery && (
+                                <p className="text-white/50 text-xs mt-1">ETA: {ship.scheduledDelivery}</p>
+                              )}
                             </div>
-                          </button>
-                        ))}
+                          </div>
+                        </button>
+                      ))
+                    )
+                  )}
+                  
+                  {qvSubTab === 'outbound' && (
+                    qvData.outbound.length === 0 ? (
+                      <div className="text-center py-6">
+                        <p className="text-white/40">No outbound shipments. Click "Refresh from UPS" to load.</p>
                       </div>
-                    )}
-                  </>
+                    ) : (
+                      qvData.outbound.map((ship, i) => (
+                        <button
+                          key={i}
+                          onClick={() => handleSearch(ship.trackingNumber)}
+                          className="w-full text-left p-3 bg-green-500/10 hover:bg-green-500/20 rounded-xl transition-colors"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                              <p className="text-green-300 text-xs">To: {ship.recipientName || ship.recipientAddress}</p>
+                            </div>
+                            <div className="text-right">
+                              <span className="px-2 py-0.5 bg-green-500/30 text-green-300 text-xs rounded-full">
+                                {ship.status}
+                              </span>
+                              {ship.scheduledDelivery && (
+                                <p className="text-white/50 text-xs mt-1">ETA: {ship.scheduledDelivery}</p>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      ))
+                    )
+                  )}
+                  
+                  {qvSubTab === 'arriving' && (
+                    qvData.arrivingToday.length === 0 ? (
+                      <div className="text-center py-6">
+                        <p className="text-white/40">No packages arriving today.</p>
+                      </div>
+                    ) : (
+                      qvData.arrivingToday.map((ship, i) => (
+                        <button
+                          key={i}
+                          onClick={() => handleSearch(ship.trackingNumber)}
+                          className="w-full text-left p-3 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition-colors"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                              <p className="text-amber-300 text-xs">From: {ship.shipperName || ship.shipperAddress}</p>
+                            </div>
+                            <span className="px-2 py-0.5 bg-amber-500/30 text-amber-300 text-xs rounded-full">
+                              🚚 Arriving Today
+                            </span>
+                          </div>
+                        </button>
+                      ))
+                    )
+                  )}
+                  
+                  {qvSubTab === 'exceptions' && (
+                    qvData.exceptions.length === 0 ? (
+                      <div className="text-center py-6">
+                        <p className="text-white/40">✅ No exceptions - all shipments on track!</p>
+                      </div>
+                    ) : (
+                      qvData.exceptions.map((ship, i) => (
+                        <button
+                          key={i}
+                          onClick={() => handleSearch(ship.trackingNumber)}
+                          className="w-full text-left p-3 bg-red-500/10 hover:bg-red-500/20 rounded-xl transition-colors"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                              <p className="text-red-300 text-xs">{ship.shipperName || ship.shipperAddress}</p>
+                            </div>
+                            <span className="px-2 py-0.5 bg-red-500/30 text-red-300 text-xs rounded-full">
+                              ⚠️ {ship.status}
+                            </span>
+                          </div>
+                        </button>
+                      ))
+                    )
+                  )}
+                </div>
+
+                {/* Legacy inbound results */}
+                {inboundResults.length > 0 && (
+                  <div className="border-t border-white/10 pt-4">
+                    <p className="text-white/60 text-xs mb-2">Origin ZIP Search Results:</p>
+                    <div className="space-y-2">
+                      {inboundResults.map((ship, i) => (
+                        <button
+                          key={i}
+                          onClick={() => handleSearch(ship.tracking)}
+                          className="w-full text-left p-3 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition-colors"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-mono text-white text-sm">{ship.tracking}</p>
+                              <p className="text-amber-300 text-xs">From: {ship.origin}</p>
+                            </div>
+                            <span className="px-2 py-0.5 bg-amber-500/30 text-amber-300 text-xs rounded-full">
+                              {ship.status}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             )}
