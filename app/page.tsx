@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Package, ArrowDownToLine, ArrowUpFromLine, CheckCircle, XCircle, Truck, Clock } from 'lucide-react';
+import { 
+  Search, Package, ArrowDownToLine, ArrowUpFromLine, 
+  CheckCircle, XCircle, Truck, Clock, AlertTriangle,
+  MapPin, Calendar, Building2, RefreshCw, Filter
+} from 'lucide-react';
 
 interface InboundInfo {
   scanned: boolean;
@@ -55,6 +59,12 @@ interface PackageResult {
   outbound?: OutboundInfo;
   message: string;
   upsLive?: UPSLiveData;
+  quantumView?: {
+    trackingNumber: string;
+    status: string;
+    origin: { city: string; state: string; postalCode: string };
+    destination: { city: string; state: string; postalCode: string };
+  };
 }
 
 interface RecentScan {
@@ -71,18 +81,37 @@ interface RecentOutbound {
   service: string;
 }
 
+interface InboundShipment {
+  tracking: string;
+  origin: string;
+  status: string;
+  shipDate: string;
+  service: string;
+  lastActivity: string;
+}
+
+interface QVStats {
+  totalEvents: number;
+  totalShipments: number;
+}
+
 export default function Home() {
   const [query, setQuery] = useState('');
+  const [originZip, setOriginZip] = useState('');
   const [result, setResult] = useState<PackageResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [recentScans, setRecentScans] = useState<RecentScan[]>([]);
   const [recentOutbound, setRecentOutbound] = useState<RecentOutbound[]>([]);
-  const [activeTab, setActiveTab] = useState<'inbound' | 'outbound'>('inbound');
+  const [activeTab, setActiveTab] = useState<'search' | 'inbound' | 'outbound' | 'quantum'>('search');
   const [stats, setStats] = useState({ inboundTotal: 0, outboundTotal: 0 });
+  const [qvStats, setQvStats] = useState<QVStats>({ totalEvents: 0, totalShipments: 0 });
+  const [inboundResults, setInboundResults] = useState<InboundShipment[]>([]);
+  const [inboundLoading, setInboundLoading] = useState(false);
 
   useEffect(() => {
     fetchRecent();
     fetchStats();
+    fetchQVStats();
   }, []);
 
   const fetchRecent = async () => {
@@ -107,12 +136,23 @@ export default function Home() {
     }
   };
 
+  const fetchQVStats = async () => {
+    try {
+      const res = await fetch('/api/webhooks/ups?action=events');
+      const data = await res.json();
+      setQvStats({ totalEvents: data.totalEvents || 0, totalShipments: data.totalShipments || 0 });
+    } catch (error) {
+      console.error('Error fetching QV stats:', error);
+    }
+  };
+
   const handleSearch = async (searchQuery?: string) => {
     const q = searchQuery || query;
     if (!q.trim()) return;
     
     setLoading(true);
     setQuery(q);
+    setActiveTab('search');
     try {
       const res = await fetch(`/api/lookup?q=${encodeURIComponent(q.trim())}`);
       const data = await res.json();
@@ -130,6 +170,22 @@ export default function Home() {
     }
   };
 
+  const searchInboundByOrigin = async () => {
+    if (!originZip.trim()) return;
+    
+    setInboundLoading(true);
+    try {
+      const res = await fetch(`/api/inbound?originZip=${encodeURIComponent(originZip.trim())}`);
+      const data = await res.json();
+      setInboundResults(data.shipments || []);
+      setActiveTab('quantum');
+    } catch (error) {
+      console.error('Error searching inbound:', error);
+    } finally {
+      setInboundLoading(false);
+    }
+  };
+
   const getResultColor = () => {
     if (!result) return '';
     if (result.type === 'both') return 'bg-purple-50 border-purple-300';
@@ -142,27 +198,35 @@ export default function Home() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900">
       {/* Header */}
       <header className="bg-white/10 backdrop-blur-md border-b border-white/10">
-        <div className="max-w-5xl mx-auto px-4 py-5">
-          <div className="flex items-center gap-4">
-            <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-3 rounded-2xl">
-              <Package className="w-10 h-10 text-white" />
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-3 rounded-2xl">
+                <Package className="w-8 h-8 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-white">Promos Ink Supply Chain</h1>
+                <p className="text-indigo-200 text-sm">Enterprise Shipment Visibility Platform</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-3xl font-bold text-white">Promos Ink Supply Chain</h1>
-              <p className="text-indigo-200">Inbound & Outbound Shipment Lookup</p>
-            </div>
+            <button 
+              onClick={() => { fetchRecent(); fetchStats(); fetchQVStats(); }}
+              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+            >
+              <RefreshCw className="w-5 h-5 text-white" />
+            </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 py-6">
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
+      <main className="max-w-7xl mx-auto px-4 py-6">
+        {/* Stats Dashboard */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-blue-500/20 backdrop-blur-sm rounded-2xl p-4 border border-blue-400/30">
             <div className="flex items-center gap-3">
               <ArrowDownToLine className="w-8 h-8 text-blue-400" />
               <div>
-                <p className="text-blue-200 text-sm">Inbound Scans</p>
+                <p className="text-blue-200 text-xs">Inbound Scans</p>
                 <p className="text-2xl font-bold text-white">{stats.inboundTotal.toLocaleString()}</p>
               </div>
             </div>
@@ -171,46 +235,94 @@ export default function Home() {
             <div className="flex items-center gap-3">
               <ArrowUpFromLine className="w-8 h-8 text-green-400" />
               <div>
-                <p className="text-green-200 text-sm">Outbound Shipments</p>
+                <p className="text-green-200 text-xs">Outbound</p>
                 <p className="text-2xl font-bold text-white">{stats.outboundTotal.toLocaleString()}</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-amber-500/20 backdrop-blur-sm rounded-2xl p-4 border border-amber-400/30">
+            <div className="flex items-center gap-3">
+              <Truck className="w-8 h-8 text-amber-400" />
+              <div>
+                <p className="text-amber-200 text-xs">UPS Quantum View</p>
+                <p className="text-2xl font-bold text-white">{qvStats.totalShipments}</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-purple-500/20 backdrop-blur-sm rounded-2xl p-4 border border-purple-400/30">
+            <div className="flex items-center gap-3">
+              <Building2 className="w-8 h-8 text-purple-400" />
+              <div>
+                <p className="text-purple-200 text-xs">Warehouses</p>
+                <p className="text-2xl font-bold text-white">FB1 & FB2</p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Search Box */}
-        <div className="bg-white rounded-3xl shadow-2xl p-6 mb-6">
-          <label className="block text-gray-700 text-lg font-semibold mb-3">
-            🔍 Search Tracking # or PO #
-          </label>
-          <div className="flex gap-3">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="e.g. 1Z90A10R0306936706 or 84379144"
-              className="flex-1 px-5 py-4 text-lg border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-500 transition-colors text-gray-900"
-              autoFocus
-            />
-            <button
-              onClick={() => handleSearch()}
-              disabled={loading || !query.trim()}
-              className="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-400 text-white font-bold rounded-xl transition-all flex items-center gap-2"
-            >
-              {loading ? (
-                <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Search className="w-6 h-6" />
-              )}
-              Search
-            </button>
+        {/* Main Search Area */}
+        <div className="grid md:grid-cols-2 gap-6 mb-6">
+          {/* Tracking Search */}
+          <div className="bg-white rounded-2xl shadow-xl p-5">
+            <label className="block text-gray-700 font-semibold mb-2 flex items-center gap-2">
+              <Search className="w-5 h-5" /> Search Tracking # or PO #
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                placeholder="1Z90A10R0306936706 or 84379144"
+                className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-500 transition-colors text-gray-900"
+              />
+              <button
+                onClick={() => handleSearch()}
+                disabled={loading || !query.trim()}
+                className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-400 text-white font-bold rounded-xl transition-all flex items-center gap-2"
+              >
+                {loading ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Search className="w-5 h-5" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Origin/Supplier Search */}
+          <div className="bg-white rounded-2xl shadow-xl p-5">
+            <label className="block text-gray-700 font-semibold mb-2 flex items-center gap-2">
+              <MapPin className="w-5 h-5" /> Search Inbound by Origin ZIP
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={originZip}
+                onChange={(e) => setOriginZip(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && searchInboundByOrigin()}
+                placeholder="e.g. 76107 (Fort Worth)"
+                className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 transition-colors text-gray-900"
+              />
+              <button
+                onClick={searchInboundByOrigin}
+                disabled={inboundLoading || !originZip.trim()}
+                className="px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:from-gray-400 disabled:to-gray-400 text-white font-bold rounded-xl transition-all flex items-center gap-2"
+              >
+                {inboundLoading ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Filter className="w-5 h-5" />
+                )}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">Find shipments coming FROM a supplier location</p>
           </div>
         </div>
 
-        {/* Result */}
-        {result && (
-          <div className={`rounded-3xl shadow-xl p-6 mb-6 border-2 ${getResultColor()}`}>
+        {/* Search Result */}
+        {result && activeTab === 'search' && (
+          <div className={`rounded-2xl shadow-xl p-6 mb-6 border-2 ${getResultColor()}`}>
             {/* Result Header */}
             <div className="flex items-center gap-4 mb-4">
               {result.type === 'inbound' && <ArrowDownToLine className="w-12 h-12 text-blue-600" />}
@@ -223,227 +335,321 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Inbound Details */}
-            {result.inbound && (
-              <div className="bg-blue-100/50 rounded-xl p-4 mb-4">
-                <h3 className="font-bold text-blue-800 mb-2 flex items-center gap-2">
-                  <ArrowDownToLine className="w-5 h-5" /> Inbound Details
-                </h3>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  {result.inbound.scanned && (
-                    <>
+            <div className="grid md:grid-cols-2 gap-4">
+              {/* Inbound Details */}
+              {result.inbound && (
+                <div className="bg-blue-100/50 rounded-xl p-4">
+                  <h3 className="font-bold text-blue-800 mb-2 flex items-center gap-2">
+                    <ArrowDownToLine className="w-5 h-5" /> Inbound Details
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {result.inbound.scanned && (
+                      <>
+                        <div>
+                          <p className="text-blue-600 text-xs">Scan Time</p>
+                          <p className="font-bold text-gray-800">{result.inbound.scanTimestamp}</p>
+                        </div>
+                        <div>
+                          <p className="text-blue-600 text-xs">Status</p>
+                          <p className="font-bold text-gray-800">{result.inbound.scanStatus}</p>
+                        </div>
+                      </>
+                    )}
+                    {result.inbound.poNumber && (
                       <div>
-                        <p className="text-blue-600 text-xs">Scan Time</p>
-                        <p className="font-bold text-gray-800">{result.inbound.scanTimestamp}</p>
+                        <p className="text-blue-600 text-xs">PO #</p>
+                        <p className="font-bold text-gray-800">{result.inbound.poNumber}</p>
                       </div>
+                    )}
+                    {result.inbound.customer && (
                       <div>
-                        <p className="text-blue-600 text-xs">Scan Status</p>
-                        <p className="font-bold text-gray-800">{result.inbound.scanStatus}</p>
+                        <p className="text-blue-600 text-xs">Customer</p>
+                        <p className="font-bold text-gray-800">{result.inbound.customer}</p>
                       </div>
-                    </>
-                  )}
-                  {result.inbound.poNumber && (
-                    <div>
-                      <p className="text-blue-600 text-xs">PO #</p>
-                      <p className="font-bold text-gray-800">{result.inbound.poNumber}</p>
-                    </div>
-                  )}
-                  {result.inbound.customer && (
-                    <div>
-                      <p className="text-blue-600 text-xs">Customer</p>
-                      <p className="font-bold text-gray-800">{result.inbound.customer}</p>
-                    </div>
-                  )}
-                  {result.inbound.upsStatus && (
-                    <div>
-                      <p className="text-blue-600 text-xs">UPS Status</p>
-                      <p className="font-bold text-gray-800">{result.inbound.upsStatus}</p>
-                    </div>
-                  )}
-                  {result.inbound.shipper && (
-                    <div className="col-span-2">
-                      <p className="text-blue-600 text-xs">Shipper</p>
-                      <p className="font-bold text-gray-800">{result.inbound.shipper}</p>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Outbound Details */}
-            {result.outbound && (
-              <div className="bg-green-100/50 rounded-xl p-4">
-                <h3 className="font-bold text-green-800 mb-2 flex items-center gap-2">
-                  <ArrowUpFromLine className="w-5 h-5" /> Outbound Details
-                </h3>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <p className="text-green-600 text-xs">Shipped From</p>
-                    <p className="font-bold text-gray-800">{result.outbound.location} - {result.outbound.station}</p>
-                  </div>
-                  <div>
-                    <p className="text-green-600 text-xs">Service</p>
-                    <p className="font-bold text-gray-800">{result.outbound.service}</p>
-                  </div>
-                  {result.outbound.recipient && (
+              {/* Outbound Details */}
+              {result.outbound && (
+                <div className="bg-green-100/50 rounded-xl p-4">
+                  <h3 className="font-bold text-green-800 mb-2 flex items-center gap-2">
+                    <ArrowUpFromLine className="w-5 h-5" /> Outbound Details
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
-                      <p className="text-green-600 text-xs">Recipient</p>
-                      <p className="font-bold text-gray-800">{result.outbound.recipient}</p>
+                      <p className="text-green-600 text-xs">From</p>
+                      <p className="font-bold text-gray-800">{result.outbound.location || 'Quantum View'}</p>
                     </div>
-                  )}
-                  {result.outbound.city && (
                     <div>
-                      <p className="text-green-600 text-xs">Destination</p>
-                      <p className="font-bold text-gray-800">{result.outbound.city}, {result.outbound.state} {result.outbound.zip}</p>
+                      <p className="text-green-600 text-xs">Service</p>
+                      <p className="font-bold text-gray-800">{result.outbound.service || 'UPS'}</p>
                     </div>
-                  )}
-                  {result.outbound.reference && (
-                    <div className="col-span-2">
-                      <p className="text-green-600 text-xs">Reference</p>
-                      <p className="font-bold text-gray-800">{result.outbound.reference}</p>
-                    </div>
-                  )}
+                    {result.outbound.recipient && (
+                      <div>
+                        <p className="text-green-600 text-xs">Recipient</p>
+                        <p className="font-bold text-gray-800">{result.outbound.recipient}</p>
+                      </div>
+                    )}
+                    {result.outbound.city && (
+                      <div>
+                        <p className="text-green-600 text-xs">Destination</p>
+                        <p className="font-bold text-gray-800">{result.outbound.city}, {result.outbound.state}</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* UPS Live Tracking */}
-            {result.upsLive && (
-              <div className={`rounded-xl p-4 ${result.upsLive.isException ? 'bg-red-100/50' : 'bg-amber-100/50'}`}>
-                <h3 className={`font-bold mb-2 flex items-center gap-2 ${result.upsLive.isException ? 'text-red-800' : 'text-amber-800'}`}>
-                  <Truck className="w-5 h-5" /> UPS Live Tracking
-                  {result.upsLive.isException && <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full">EXCEPTION</span>}
-                </h3>
-                <div className="grid grid-cols-2 gap-3 text-sm mb-3">
-                  <div>
-                    <p className="text-amber-600 text-xs">Current Status</p>
-                    <p className="font-bold text-gray-800">{result.upsLive.status}</p>
+              {/* Quantum View Data */}
+              {result.quantumView && (
+                <div className="bg-amber-100/50 rounded-xl p-4">
+                  <h3 className="font-bold text-amber-800 mb-2 flex items-center gap-2">
+                    <Truck className="w-5 h-5" /> Quantum View
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-amber-600 text-xs">Status</p>
+                      <p className="font-bold text-gray-800">{result.quantumView.status}</p>
+                    </div>
+                    <div>
+                      <p className="text-amber-600 text-xs">Origin</p>
+                      <p className="font-bold text-gray-800">
+                        {result.quantumView.origin?.city}, {result.quantumView.origin?.state}
+                      </p>
+                    </div>
                   </div>
-                  {result.upsLive.location && (
-                    <div>
-                      <p className="text-amber-600 text-xs">Location</p>
-                      <p className="font-bold text-gray-800">{result.upsLive.location}</p>
-                    </div>
-                  )}
-                  {result.upsLive.weight && (
-                    <div>
-                      <p className="text-amber-600 text-xs">Weight</p>
-                      <p className="font-bold text-gray-800">{result.upsLive.weight} lbs</p>
-                    </div>
-                  )}
-                  {result.upsLive.service && (
-                    <div>
-                      <p className="text-amber-600 text-xs">Service</p>
-                      <p className="font-bold text-gray-800">{result.upsLive.service}</p>
-                    </div>
-                  )}
                 </div>
-                {result.upsLive.events && result.upsLive.events.length > 0 && (
-                  <div className="border-t border-amber-200 pt-3">
-                    <p className="text-amber-700 text-xs font-semibold mb-2">Tracking History</p>
-                    <div className="space-y-1">
-                      {result.upsLive.events.map((event, idx) => (
-                        <div key={idx} className="flex items-start gap-2 text-xs">
-                          <div className={`w-2 h-2 rounded-full mt-1 ${idx === 0 ? 'bg-green-500' : 'bg-gray-300'}`} />
-                          <div className="flex-1">
-                            <span className="text-gray-600">{event.date} {event.time}</span>
-                            <span className="mx-2">•</span>
-                            <span className="font-medium text-gray-800">{event.description}</span>
-                            {event.location && <span className="text-gray-500"> - {event.location}</span>}
-                          </div>
+              )}
+
+              {/* UPS Live Tracking */}
+              {result.upsLive && (
+                <div className={`rounded-xl p-4 ${result.upsLive.isException ? 'bg-red-100/50' : 'bg-amber-100/50'}`}>
+                  <h3 className={`font-bold mb-2 flex items-center gap-2 ${result.upsLive.isException ? 'text-red-800' : 'text-amber-800'}`}>
+                    <Truck className="w-5 h-5" /> UPS Live
+                    {result.upsLive.isException && (
+                      <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full">EXCEPTION</span>
+                    )}
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-amber-600 text-xs">Status</p>
+                      <p className="font-bold text-gray-800">{result.upsLive.status}</p>
+                    </div>
+                    {result.upsLive.location && (
+                      <div>
+                        <p className="text-amber-600 text-xs">Location</p>
+                        <p className="font-bold text-gray-800">{result.upsLive.location}</p>
+                      </div>
+                    )}
+                  </div>
+                  {result.upsLive.events && result.upsLive.events.length > 0 && (
+                    <div className="border-t border-amber-200 pt-2 mt-2">
+                      <p className="text-amber-700 text-xs font-semibold mb-1">Recent Activity</p>
+                      {result.upsLive.events.slice(0, 3).map((event, idx) => (
+                        <div key={idx} className="text-xs text-gray-700">
+                          • {event.description} - {event.location}
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        {/* Tabs for Recent Activity */}
-        <div className="bg-white/10 backdrop-blur-sm rounded-3xl border border-white/10 overflow-hidden">
-          {/* Tab Headers */}
+        {/* Inbound Search Results */}
+        {activeTab === 'quantum' && inboundResults.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
+            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <MapPin className="w-5 h-5 text-amber-500" /> 
+              Inbound from ZIP: {originZip}
+              <span className="ml-2 px-2 py-1 bg-amber-100 text-amber-700 text-sm rounded-full">
+                {inboundResults.length} shipments
+              </span>
+            </h3>
+            <div className="space-y-2">
+              {inboundResults.map((ship, i) => (
+                <div 
+                  key={i}
+                  onClick={() => handleSearch(ship.tracking)}
+                  className="p-3 bg-amber-50 hover:bg-amber-100 rounded-xl cursor-pointer transition-colors"
+                >
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <p className="font-mono font-bold text-gray-800">{ship.tracking}</p>
+                      <p className="text-sm text-gray-600">From: {ship.origin}</p>
+                    </div>
+                    <div className="text-right">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        ship.status === 'DELIVERED' ? 'bg-green-100 text-green-700' :
+                        ship.status?.includes('EXCEPTION') ? 'bg-red-100 text-red-700' :
+                        'bg-blue-100 text-blue-700'
+                      }`}>
+                        {ship.status}
+                      </span>
+                      {ship.lastActivity && (
+                        <p className="text-xs text-gray-500 mt-1">{ship.lastActivity}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Tab Navigation */}
+        <div className="bg-white/10 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden">
           <div className="flex border-b border-white/10">
             <button
               onClick={() => setActiveTab('inbound')}
-              className={`flex-1 px-6 py-4 font-semibold flex items-center justify-center gap-2 transition-colors ${
+              className={`flex-1 px-4 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm ${
                 activeTab === 'inbound' 
                   ? 'bg-blue-500/20 text-blue-300 border-b-2 border-blue-400' 
                   : 'text-white/60 hover:bg-white/5'
               }`}
             >
-              <ArrowDownToLine className="w-5 h-5" />
+              <ArrowDownToLine className="w-4 h-4" />
               Recent Inbound
             </button>
             <button
               onClick={() => setActiveTab('outbound')}
-              className={`flex-1 px-6 py-4 font-semibold flex items-center justify-center gap-2 transition-colors ${
+              className={`flex-1 px-4 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm ${
                 activeTab === 'outbound' 
                   ? 'bg-green-500/20 text-green-300 border-b-2 border-green-400' 
                   : 'text-white/60 hover:bg-white/5'
               }`}
             >
-              <ArrowUpFromLine className="w-5 h-5" />
+              <ArrowUpFromLine className="w-4 h-4" />
               Recent Outbound
+            </button>
+            <button
+              onClick={() => setActiveTab('quantum')}
+              className={`flex-1 px-4 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm ${
+                activeTab === 'quantum' 
+                  ? 'bg-amber-500/20 text-amber-300 border-b-2 border-amber-400' 
+                  : 'text-white/60 hover:bg-white/5'
+              }`}
+            >
+              <Truck className="w-4 h-4" />
+              Quantum View
             </button>
           </div>
 
-          {/* Tab Content */}
-          <div className="p-4 max-h-80 overflow-y-auto">
-            {activeTab === 'inbound' ? (
+          <div className="p-4 max-h-96 overflow-y-auto">
+            {activeTab === 'inbound' && (
               <div className="space-y-2">
-                {recentScans.map((scan, i) => (
-                  <button
-                    key={`${scan.tracking}-${i}`}
-                    onClick={() => handleSearch(scan.tracking)}
-                    className="w-full text-left p-3 bg-blue-500/10 hover:bg-blue-500/20 rounded-xl transition-colors"
-                  >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="font-mono text-white text-sm">{scan.tracking}</p>
-                        {scan.po && <p className="text-blue-300 text-xs">PO: {scan.po}</p>}
+                {recentScans.length === 0 ? (
+                  <p className="text-white/40 text-center py-8">No recent inbound scans</p>
+                ) : (
+                  recentScans.map((scan, i) => (
+                    <button
+                      key={`${scan.tracking}-${i}`}
+                      onClick={() => handleSearch(scan.tracking)}
+                      className="w-full text-left p-3 bg-blue-500/10 hover:bg-blue-500/20 rounded-xl transition-colors"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-mono text-white text-sm">{scan.tracking}</p>
+                          {scan.po && <p className="text-blue-300 text-xs">PO: {scan.po}</p>}
+                        </div>
+                        <div className="text-right">
+                          <p className="text-white/60 text-xs">{scan.timestamp}</p>
+                          <span className="inline-block px-2 py-0.5 bg-blue-500/30 text-blue-300 text-xs rounded-full">
+                            {scan.status}
+                          </span>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-white/60 text-xs">{scan.timestamp}</p>
-                        <span className="inline-block px-2 py-0.5 bg-blue-500/30 text-blue-300 text-xs rounded-full">
-                          {scan.status}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  ))
+                )}
               </div>
-            ) : (
+            )}
+
+            {activeTab === 'outbound' && (
               <div className="space-y-2">
-                {recentOutbound.map((ship, i) => (
-                  <button
-                    key={`${ship.tracking}-${i}`}
-                    onClick={() => handleSearch(ship.tracking)}
-                    className="w-full text-left p-3 bg-green-500/10 hover:bg-green-500/20 rounded-xl transition-colors"
-                  >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="font-mono text-white text-sm">{ship.tracking}</p>
-                        <p className="text-green-300 text-xs">To: {ship.recipient}</p>
+                {recentOutbound.length === 0 ? (
+                  <p className="text-white/40 text-center py-8">No recent outbound shipments</p>
+                ) : (
+                  recentOutbound.map((ship, i) => (
+                    <button
+                      key={`${ship.tracking}-${i}`}
+                      onClick={() => handleSearch(ship.tracking)}
+                      className="w-full text-left p-3 bg-green-500/10 hover:bg-green-500/20 rounded-xl transition-colors"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-mono text-white text-sm">{ship.tracking}</p>
+                          <p className="text-green-300 text-xs">To: {ship.recipient}</p>
+                        </div>
+                        <div className="text-right">
+                          <span className="inline-block px-2 py-0.5 bg-green-500/30 text-green-300 text-xs rounded-full">
+                            {ship.location}
+                          </span>
+                          <p className="text-white/60 text-xs mt-1">{ship.service}</p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <span className="inline-block px-2 py-0.5 bg-green-500/30 text-green-300 text-xs rounded-full">
-                          {ship.location}
-                        </span>
-                        <p className="text-white/60 text-xs mt-1">{ship.service}</p>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+
+            {activeTab === 'quantum' && (
+              <div className="space-y-4">
+                {qvStats.totalShipments === 0 && inboundResults.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Truck className="w-12 h-12 text-white/20 mx-auto mb-3" />
+                    <p className="text-white/40">Waiting for UPS Quantum View events...</p>
+                    <p className="text-white/30 text-sm mt-2">Events will appear when UPS sends shipment updates</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-amber-500/20 rounded-xl p-3">
+                        <p className="text-amber-300 text-xs">Total Events</p>
+                        <p className="text-2xl font-bold text-white">{qvStats.totalEvents}</p>
+                      </div>
+                      <div className="bg-amber-500/20 rounded-xl p-3">
+                        <p className="text-amber-300 text-xs">Tracked Shipments</p>
+                        <p className="text-2xl font-bold text-white">{qvStats.totalShipments}</p>
                       </div>
                     </div>
-                  </button>
-                ))}
+                    {inboundResults.length > 0 && (
+                      <div className="space-y-2">
+                        {inboundResults.map((ship, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleSearch(ship.tracking)}
+                            className="w-full text-left p-3 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition-colors"
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-mono text-white text-sm">{ship.tracking}</p>
+                                <p className="text-amber-300 text-xs">From: {ship.origin}</p>
+                              </div>
+                              <span className="px-2 py-0.5 bg-amber-500/30 text-amber-300 text-xs rounded-full">
+                                {ship.status}
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             )}
           </div>
         </div>
       </main>
 
-      <footer className="text-center py-6 text-white/40 text-sm">
-        Inbound scans sync every 5 min • Outbound from FB1 & FB2 shipping stations
+      <footer className="text-center py-4 text-white/40 text-sm border-t border-white/10 mt-8">
+        <p>Promos Ink Supply Chain Platform • FB1 & FB2 Warehouses • Dallas, TX</p>
+        <p className="text-xs mt-1">Inbound scans sync every 5 min • UPS Quantum View • Real-time tracking</p>
       </footer>
     </div>
   );
