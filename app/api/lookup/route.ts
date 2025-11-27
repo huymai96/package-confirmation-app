@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { trackPackage, isConfigured as isUPSConfigured } from '@/app/lib/ups-integration';
 
 // Check if running in cloud mode (Vercel) or local mode
 const IS_CLOUD = process.env.BLOB_READ_WRITE_TOKEN ? true : false;
@@ -14,6 +15,12 @@ async function getCloudFunctions() {
   return module;
 }
 
+// Check if tracking number is UPS format
+function isUPSTracking(tracking: string): boolean {
+  // UPS tracking numbers start with 1Z and are 18 characters
+  return /^1Z[A-Z0-9]{16}$/i.test(tracking.trim());
+}
+
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
@@ -25,7 +32,7 @@ export async function GET(request: Request) {
   
   try {
     if (IS_CLOUD) {
-      // Cloud mode - use Vercel KV
+      // Cloud mode - use Vercel Blob
       const cloud = await getCloudFunctions();
       
       if (stats === 'true') {
@@ -44,7 +51,36 @@ export async function GET(request: Request) {
       }
       
       if (query) {
+        // Get local data first
         const result = await cloud.lookupPackage(query);
+        
+        // If it's a UPS tracking number, also get live UPS data
+        if (isUPSTracking(query) && isUPSConfigured()) {
+          try {
+            const upsData = await trackPackage(query.trim());
+            if (upsData) {
+              // Merge UPS live data with our local data
+              return NextResponse.json({
+                ...result,
+                upsLive: {
+                  status: upsData.statusDescription,
+                  deliveredAt: upsData.actualDelivery,
+                  estimatedDelivery: upsData.estimatedDelivery,
+                  location: upsData.events[0]?.location,
+                  isException: upsData.isException,
+                  exceptionReason: upsData.exceptionReason,
+                  weight: upsData.weight,
+                  service: upsData.service,
+                  events: upsData.events.slice(0, 5) // Last 5 events
+                }
+              });
+            }
+          } catch (upsError) {
+            console.error('UPS tracking error:', upsError);
+            // Return result without UPS data if UPS fails
+          }
+        }
+        
         return NextResponse.json(result);
       }
     } else {

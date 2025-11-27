@@ -27,6 +27,26 @@ interface OutboundInfo {
   carrier?: string;
 }
 
+interface UPSEvent {
+  date: string;
+  time: string;
+  location: string;
+  status: string;
+  description: string;
+}
+
+interface UPSLiveData {
+  status: string;
+  deliveredAt?: string;
+  estimatedDelivery?: string;
+  location?: string;
+  isException: boolean;
+  exceptionReason?: string;
+  weight?: string;
+  service?: string;
+  events: UPSEvent[];
+}
+
 interface PackageResult {
   found: boolean;
   type: 'inbound' | 'outbound' | 'both' | 'none';
@@ -34,6 +54,7 @@ interface PackageResult {
   inbound?: InboundInfo;
   outbound?: OutboundInfo;
   message: string;
+  upsLive?: UPSLiveData;
 }
 
 interface RecentScan {
@@ -283,6 +304,58 @@ export default function Home() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* UPS Live Tracking */}
+            {result.upsLive && (
+              <div className={`rounded-xl p-4 ${result.upsLive.isException ? 'bg-red-100/50' : 'bg-amber-100/50'}`}>
+                <h3 className={`font-bold mb-2 flex items-center gap-2 ${result.upsLive.isException ? 'text-red-800' : 'text-amber-800'}`}>
+                  <Truck className="w-5 h-5" /> UPS Live Tracking
+                  {result.upsLive.isException && <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full">EXCEPTION</span>}
+                </h3>
+                <div className="grid grid-cols-2 gap-3 text-sm mb-3">
+                  <div>
+                    <p className="text-amber-600 text-xs">Current Status</p>
+                    <p className="font-bold text-gray-800">{result.upsLive.status}</p>
+                  </div>
+                  {result.upsLive.location && (
+                    <div>
+                      <p className="text-amber-600 text-xs">Location</p>
+                      <p className="font-bold text-gray-800">{result.upsLive.location}</p>
+                    </div>
+                  )}
+                  {result.upsLive.weight && (
+                    <div>
+                      <p className="text-amber-600 text-xs">Weight</p>
+                      <p className="font-bold text-gray-800">{result.upsLive.weight} lbs</p>
+                    </div>
+                  )}
+                  {result.upsLive.service && (
+                    <div>
+                      <p className="text-amber-600 text-xs">Service</p>
+                      <p className="font-bold text-gray-800">{result.upsLive.service}</p>
+                    </div>
+                  )}
+                </div>
+                {result.upsLive.events && result.upsLive.events.length > 0 && (
+                  <div className="border-t border-amber-200 pt-3">
+                    <p className="text-amber-700 text-xs font-semibold mb-2">Tracking History</p>
+                    <div className="space-y-1">
+                      {result.upsLive.events.map((event, idx) => (
+                        <div key={idx} className="flex items-start gap-2 text-xs">
+                          <div className={`w-2 h-2 rounded-full mt-1 ${idx === 0 ? 'bg-green-500' : 'bg-gray-300'}`} />
+                          <div className="flex-1">
+                            <span className="text-gray-600">{event.date} {event.time}</span>
+                            <span className="mx-2">•</span>
+                            <span className="font-medium text-gray-800">{event.description}</span>
+                            {event.location && <span className="text-gray-500"> - {event.location}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
