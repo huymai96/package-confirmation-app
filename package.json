@@ -9,13 +9,11 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@vercel/blob": "^2.0.0",
-    "@vercel/kv": "^3.0.0",
-    "date-fns": "^3.0.0",
-    "lucide-react": "^0.300.0",
     "next": "14.0.4",
     "react": "18.2.0",
-    "react-dom": "18.2.0"
+    "react-dom": "18.2.0",
+    "date-fns": "^3.0.0",
+    "lucide-react": "^0.300.0"
   },
   "devDependencies": {
     "@types/node": "20.10.5",
@@ -27,3 +25,4 @@
     "typescript": "5.3.3"
   }
 }
+
