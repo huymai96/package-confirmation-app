@@ -65,7 +65,7 @@ export async function GET() {
     for (const { name: subName, type } of uniqueNames) {
       try {
         const qvResponse = await fetch(
-          `${UPS_CONFIG.baseUrl}/api/quantumview/v1/response`,
+          `${UPS_CONFIG.baseUrl}/api/quantumview/v2/events`,
           {
             method: 'POST',
             headers: {
@@ -77,16 +77,10 @@ export async function GET() {
             body: JSON.stringify({
               QuantumViewRequest: {
                 Request: {
-                  TransactionReference: {
-                    CustomerContext: 'PromoInkSupplyChain'
-                  }
+                  RequestAction: 'QVEvents'
                 },
                 SubscriptionRequest: {
-                  Name: subName,
-                  DateTimeRange: {
-                    BeginDateTime: getDateOffset(-7),
-                    EndDateTime: getDateOffset(0)
-                  }
+                  Name: subName
                 }
               }
             })

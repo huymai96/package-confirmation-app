@@ -251,9 +251,9 @@ export async function getQuantumViewData(): Promise<QuantumViewShipment[]> {
     for (const { name: subscriptionName, direction } of uniqueSubs) {
       if (!subscriptionName.trim()) continue;
 
-      // Use Quantum View Response API
+      // Use Quantum View Events API v2 (correct endpoint)
       const response = await fetch(
-        `${UPS_CONFIG.baseUrl}/api/quantumview/v1/response`,
+        `${UPS_CONFIG.baseUrl}/api/quantumview/v2/events`,
         {
           method: 'POST',
           headers: {
@@ -265,16 +265,10 @@ export async function getQuantumViewData(): Promise<QuantumViewShipment[]> {
           body: JSON.stringify({
             QuantumViewRequest: {
               Request: {
-                TransactionReference: {
-                  CustomerContext: 'PromoInkSupplyChain'
-                }
+                RequestAction: 'QVEvents'
               },
               SubscriptionRequest: {
-                Name: subscriptionName.trim(),
-                DateTimeRange: {
-                  BeginDateTime: getDateOffset(-7),
-                  EndDateTime: getDateOffset(0)
-                }
+                Name: subscriptionName.trim()
               }
             }
           })
