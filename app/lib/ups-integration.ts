@@ -104,7 +104,7 @@ async function getAccessToken(): Promise<string> {
     issued_at: Date.now()
   };
 
-  return tokenCache.access_token;
+  return tokenCache!.access_token;
 }
 
 /**
