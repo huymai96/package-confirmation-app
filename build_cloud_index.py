@@ -44,7 +44,95 @@ def build_index():
     # Calculate 10-day cutoff
     ten_days_ago = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
     
-    # Process S&S manifests
+    # Process combined files first (master files)
+    ss_combined = [m for m in manifests if 'ss_combined' in m.get('filename', '')]
+    sanmar_combined = [m for m in manifests if 'sanmar_combined' in m.get('filename', '')]
+    
+    # Index from S&S combined file
+    if ss_combined:
+        print(f"\nProcessing S&S combined file...")
+        for m in ss_combined:
+            try:
+                file_r = requests.get(m['url'])
+                df = pd.read_excel(BytesIO(file_r.content))  # No header offset for combined
+                
+                # Find columns
+                tracking_col = None
+                po_col = None
+                customer_col = None
+                
+                for col in df.columns:
+                    col_lower = str(col).lower()
+                    if 'tracking' in col_lower:
+                        tracking_col = col
+                    elif 'customer po' in col_lower:
+                        po_col = col
+                    elif 'customer name' in col_lower:
+                        customer_col = col
+                
+                if tracking_col:
+                    count = 0
+                    for _, row in df.iterrows():
+                        tracking = str(row.get(tracking_col, '')).strip()
+                        if tracking and tracking != 'nan' and len(tracking) > 5:
+                            normalized = normalize_tracking(tracking)
+                            po = str(row.get(po_col, '')).strip() if po_col else ''
+                            customer = str(row.get(customer_col, '')).strip() if customer_col else ''
+                            
+                            index[normalized] = {
+                                'source': 'ss',
+                                'sourceType': 'ss',
+                                'po': po,
+                                'customer': customer
+                            }
+                            count += 1
+                    print(f"  {m['filename']}: {count} tracking numbers")
+            except Exception as e:
+                print(f"  {m['filename']}: Error - {e}")
+    
+    # Index from Sanmar combined file
+    if sanmar_combined:
+        print(f"\nProcessing Sanmar combined file...")
+        for m in sanmar_combined:
+            try:
+                file_r = requests.get(m['url'])
+                df = pd.read_excel(BytesIO(file_r.content))  # No header offset for combined
+                
+                # Find columns
+                tracking_col = None
+                po_col = None
+                customer_col = None
+                
+                for col in df.columns:
+                    col_lower = str(col).lower()
+                    if 'tracking' in col_lower:
+                        tracking_col = col
+                    elif 'customer po' in col_lower:
+                        po_col = col
+                    elif 'customer name' in col_lower:
+                        customer_col = col
+                
+                if tracking_col:
+                    count = 0
+                    for _, row in df.iterrows():
+                        tracking = str(row.get(tracking_col, '')).strip()
+                        if tracking and tracking != 'nan' and len(tracking) > 5:
+                            normalized = normalize_tracking(tracking)
+                            po = str(row.get(po_col, '')).strip() if po_col else ''
+                            customer = str(row.get(customer_col, '')).strip() if customer_col else ''
+                            
+                            index[normalized] = {
+                                'source': 'sanmar',
+                                'sourceType': 'sanmar',
+                                'po': po,
+                                'customer': customer
+                            }
+                            count += 1
+                    print(f"  {m['filename']}: {count} tracking numbers")
+            except Exception as e:
+                print(f"  {m['filename']}: Error - {e}")
+    
+    # Process individual S&S manifests (from email)
     ss_files = [m for m in manifests if m.get('type') == 'ss' and 'combined' not in m.get('filename', '')]
     print(f"\nProcessing {len(ss_files)} S&S manifests...")
     for m in ss_files:

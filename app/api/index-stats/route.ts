@@ -11,10 +11,9 @@ export async function GET(request: NextRequest) {
     // Find the tracking index
     const indexBlob = blobs.find(b => b.pathname === 'tracking-index.json');
     
-    // Find combined manifest files
+    // Find combined manifest files (stored as sanmar_combined.xlsx, ss_combined.xlsx)
     const combinedFiles = blobs.filter(b => 
-      b.pathname.includes('combined') && 
-      b.pathname.startsWith('manifests/')
+      b.pathname.includes('combined')
     );
     
     // Get index data if exists
@@ -45,12 +44,19 @@ export async function GET(request: NextRequest) {
       bySource,
       indexSize: indexBlob?.size || 0,
       lastUpdated: indexBlob?.uploadedAt || null,
-      combinedFiles: combinedFiles.map(f => ({
-        name: f.pathname.replace('manifests/', ''),
-        url: f.url,
-        size: f.size,
-        uploadedAt: f.uploadedAt
-      }))
+      combinedFiles: combinedFiles.map(f => {
+        // Extract clean filename from pathname like "manifests/sanmar_combined-abc123.xlsx"
+        const parts = f.pathname.split('/');
+        const filename = parts[parts.length - 1];
+        // Clean up the hash suffix: sanmar_combined-abc123.xlsx -> sanmar_combined.xlsx
+        const cleanName = filename.replace(/-[A-Za-z0-9]+\./, '.');
+        return {
+          name: cleanName,
+          url: f.url,
+          size: f.size,
+          uploadedAt: f.uploadedAt
+        };
+      })
     });
     
   } catch (error) {
