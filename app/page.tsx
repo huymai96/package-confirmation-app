@@ -1613,41 +1613,54 @@ export default function Home() {
                   </button>
                 </div>
 
-                {/* Upload Section */}
+                {/* Auto-Capture Status */}
+                <div className="bg-gradient-to-r from-emerald-500/10 to-green-500/10 rounded-xl p-4 border border-emerald-400/20">
+                  <h4 className="text-emerald-300 text-sm font-medium mb-3 flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4" /> Auto-Captured via Email
+                  </h4>
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    <div className="flex items-center gap-2 p-2 bg-white/5 rounded-lg">
+                      <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+                      <span className="text-white/80 text-sm">Sanmar</span>
+                      <span className="text-emerald-400 text-xs ml-auto">CSV via Make.com</span>
+                    </div>
+                    <div className="flex items-center gap-2 p-2 bg-white/5 rounded-lg">
+                      <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+                      <span className="text-white/80 text-sm">S&S Activewear</span>
+                      <span className="text-emerald-400 text-xs ml-auto">XLSX via Make.com</span>
+                    </div>
+                    <div className="flex items-center gap-2 p-2 bg-white/5 rounded-lg">
+                      <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                      <span className="text-white/80 text-sm">CustomInk</span>
+                      <span className="text-blue-400 text-xs ml-auto">via API Script</span>
+                    </div>
+                  </div>
+                  <p className="text-white/40 text-xs mt-2">📧 Manifests auto-captured when forwarded to Make.com webhook</p>
+                </div>
+
+                {/* Manual Upload - Only QV Inbound */}
                 <div className="bg-white/5 rounded-xl p-4">
                   <h4 className="text-white/80 text-sm font-medium mb-3 flex items-center gap-2">
-                    <FileUp className="w-4 h-4" /> Upload Manifest
+                    <FileUp className="w-4 h-4" /> Manual Upload
                   </h4>
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    {[
-                      { type: 'customink', label: 'CustomInk Orders', color: 'pink' },
-                      { type: 'sanmar', label: 'Sanmar Manifest', color: 'blue' },
-                      { type: 'ss', label: 'S&S Activewear', color: 'green' },
-                      { type: 'inbound', label: 'QV Inbound (CSV)', color: 'amber' },
-                    ].map(({ type, label, color }) => (
-                      <label
-                        key={type}
-                        className={`flex items-center gap-3 p-3 bg-${color}-500/10 hover:bg-${color}-500/20 rounded-xl cursor-pointer transition-colors border border-${color}-400/30`}
-                      >
-                        <Upload className={`w-5 h-5 text-${color}-400`} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white text-sm font-medium truncate">{label}</p>
-                          <p className="text-white/50 text-xs">.xlsx / .csv</p>
-                        </div>
-                        <input
-                          type="file"
-                          accept=".xlsx,.xls,.csv"
-                          className="hidden"
-                          disabled={uploadingManifest}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) handleManifestUpload(type, file);
-                            e.target.value = '';
-                          }}
-                        />
-                      </label>
-                    ))}
-                  </div>
+                  <label className="flex items-center gap-3 p-3 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl cursor-pointer transition-colors border border-amber-400/30">
+                    <Upload className="w-5 h-5 text-amber-400" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white text-sm font-medium">UPS Quantum View Inbound</p>
+                      <p className="text-white/50 text-xs">Download from UPS → Upload CSV here</p>
+                    </div>
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      className="hidden"
+                      disabled={uploadingManifest}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleManifestUpload('inbound', file);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
                   {uploadingManifest && (
                     <div className="mt-3 flex items-center gap-2 text-white/60 text-sm">
                       <Loader2 className="w-4 h-4 animate-spin" /> Uploading...
@@ -1655,9 +1668,12 @@ export default function Home() {
                   )}
                 </div>
 
-                {/* Manifest List */}
-                <div className="space-y-2">
-                  <h4 className="text-white/60 text-sm">Uploaded Manifests</h4>
+                {/* Manifest List - Grouped by Supplier */}
+                <div className="space-y-3">
+                  <h4 className="text-white/60 text-sm flex items-center justify-between">
+                    <span>📁 Stored Manifests</span>
+                    <span className="text-white/40 text-xs">{manifests.length} files • Keeps 10 per supplier</span>
+                  </h4>
                   {manifestsLoading ? (
                     <div className="text-center py-6">
                       <Loader2 className="w-6 h-6 text-white/40 animate-spin mx-auto" />
@@ -1665,48 +1681,79 @@ export default function Home() {
                   ) : manifests.length === 0 ? (
                     <div className="text-center py-6">
                       <File className="w-10 h-10 text-white/20 mx-auto mb-2" />
-                      <p className="text-white/40">No manifests uploaded yet</p>
-                      <p className="text-white/30 text-sm mt-1">Upload files above or use the sync script</p>
+                      <p className="text-white/40">No manifests yet</p>
+                      <p className="text-white/30 text-sm mt-1">Forward supplier emails to Make.com to auto-capture</p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {manifests.map((m, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-xl transition-colors"
-                        >
-                          <File className="w-5 h-5 text-rose-400 flex-shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-white font-medium truncate">{m.filename}</p>
-                            <p className="text-white/50 text-xs">
-                              {m.type} • {(m.size / 1024).toFixed(1)} KB • {new Date(m.uploadedAt).toLocaleString()}
-                            </p>
+                    <div className="space-y-3">
+                      {/* Group by supplier type */}
+                      {['sanmar', 'ss', 'customink', 'inbound'].map(type => {
+                        const typeManifests = manifests.filter(m => 
+                          m.filename.toLowerCase().startsWith(type) || m.type === type
+                        );
+                        if (typeManifests.length === 0) return null;
+                        const colors: Record<string, string> = {
+                          sanmar: 'blue',
+                          ss: 'green', 
+                          customink: 'pink',
+                          inbound: 'amber'
+                        };
+                        const labels: Record<string, string> = {
+                          sanmar: 'Sanmar',
+                          ss: 'S&S Activewear',
+                          customink: 'CustomInk',
+                          inbound: 'UPS QV Inbound'
+                        };
+                        const color = colors[type] || 'gray';
+                        return (
+                          <div key={type} className={`bg-${color}-500/5 rounded-xl p-3 border border-${color}-400/20`}>
+                            <div className="flex items-center gap-2 mb-2">
+                              <div className={`w-2 h-2 bg-${color}-400 rounded-full`}></div>
+                              <span className={`text-${color}-300 text-sm font-medium`}>{labels[type]}</span>
+                              <span className="text-white/40 text-xs ml-auto">{typeManifests.length} file{typeManifests.length > 1 ? 's' : ''}</span>
+                            </div>
+                            <div className="space-y-1 max-h-32 overflow-y-auto">
+                              {typeManifests.slice(0, 5).map((m, i) => (
+                                <div
+                                  key={i}
+                                  className="flex items-center gap-2 p-2 bg-black/20 hover:bg-black/30 rounded-lg transition-colors text-xs"
+                                >
+                                  <File className={`w-3 h-3 text-${color}-400 flex-shrink-0`} />
+                                  <span className="text-white/80 truncate flex-1">{m.filename}</span>
+                                  <span className="text-white/40 text-[10px]">{(m.size / 1024).toFixed(0)}KB</span>
+                                  <a
+                                    href={m.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-white/50 hover:text-white transition-colors"
+                                    title={`Download ${m.filename}`}
+                                  >
+                                    <Download className="w-3 h-3" />
+                                  </a>
+                                </div>
+                              ))}
+                              {typeManifests.length > 5 && (
+                                <p className="text-white/30 text-[10px] text-center py-1">+{typeManifests.length - 5} more</p>
+                              )}
+                            </div>
                           </div>
-                          <a
-                            href={m.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-white/80 text-xs flex items-center gap-1 transition-colors"
-                          >
-                            <Download className="w-3 h-3" /> Download
-                          </a>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
 
-                {/* API Info */}
-                <div className="bg-gradient-to-r from-rose-500/10 to-pink-500/10 rounded-xl p-4 border border-rose-400/20">
-                  <h4 className="text-rose-300 text-sm font-medium mb-2">🔌 Auto-Sync API</h4>
+                {/* Integration Info */}
+                <div className="bg-gradient-to-r from-violet-500/10 to-purple-500/10 rounded-xl p-4 border border-violet-400/20">
+                  <h4 className="text-violet-300 text-sm font-medium mb-2">📧 Email Auto-Capture</h4>
                   <p className="text-white/60 text-xs mb-2">
-                    Upload manifests automatically from your scripts:
+                    Forward supplier manifests to your Make.com webhook:
                   </p>
-                  <code className="block bg-black/30 text-green-400 text-[10px] sm:text-xs p-2 rounded font-mono break-all">
-                    python upload_manifest.py --type customink --file &quot;customink_orders.xlsx&quot;
+                  <code className="block bg-black/30 text-violet-400 text-[10px] p-2 rounded font-mono break-all">
+                    b15cp08jrvj2nnmnhxxjn56xl9b7clm6@hook.us2.make.com
                   </code>
                   <p className="text-white/40 text-[10px] mt-2">
-                    Supported types: customink, sanmar, ss, inbound
+                    Sanmar & S&S emails → auto-detected → stored with timestamps
                   </p>
                 </div>
               </div>
