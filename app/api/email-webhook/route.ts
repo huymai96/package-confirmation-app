@@ -112,10 +112,12 @@ async function cleanupOldManifests(supplierType: string) {
   }
 }
 
-// Get today's date string for filename
-function getDateString(): string {
+// Get date-time string for filename (includes time to handle multiple per day)
+function getDateTimeString(): string {
   const now = new Date();
-  return now.toISOString().split('T')[0]; // YYYY-MM-DD
+  const date = now.toISOString().split('T')[0]; // YYYY-MM-DD
+  const time = now.toTimeString().split(' ')[0].replace(/:/g, ''); // HHMMSS
+  return `${date}_${time}`;
 }
 
 // POST - Receive email webhook from Zapier/Make/Power Automate
@@ -340,26 +342,27 @@ export async function POST(request: NextRequest) {
       // Use original extension from file, or default for the supplier
       const finalExt = ['xlsx', 'xls', 'csv'].includes(originalExt) ? originalExt : defaultExt;
       
-      // Get date string for filename
-      const dateStr = getDateString();
+      // Get date-time string for filename (allows multiple per day)
+      const dateTimeStr = getDateTimeString();
       
-      // Set target filename with date and correct extension
-      // Format: supplier_YYYY-MM-DD.ext (e.g., sanmar_2025-11-28.csv)
+      // Set target filename with date-time and correct extension
+      // Format: supplier_YYYY-MM-DD_HHMMSS.ext (e.g., sanmar_2025-11-28_143025.csv)
+      // This allows multiple manifests per day per supplier (different warehouses)
       let targetFilename: string;
       let supplierKey: string;
       
       if (manifestType === 'sanmar') {
         supplierKey = 'sanmar';
-        targetFilename = `sanmar_${dateStr}.${finalExt}`;
+        targetFilename = `sanmar_${dateTimeStr}.${finalExt}`;
       } else if (manifestType === 'ss') {
         supplierKey = 's&s';
-        targetFilename = `s&s_${dateStr}.${finalExt}`;
+        targetFilename = `s&s_${dateTimeStr}.${finalExt}`;
       } else if (manifestType === 'alphabroder') {
         supplierKey = 'alphabroder';
-        targetFilename = `alphabroder_${dateStr}.${finalExt}`;
+        targetFilename = `alphabroder_${dateTimeStr}.${finalExt}`;
       } else {
         supplierKey = 'unknown';
-        targetFilename = `${dateStr}_${attachment.filename}`;
+        targetFilename = `${dateTimeStr}_${attachment.filename}`;
       }
       
       console.log(`Manifest type: ${manifestType}, Original ext: ${originalExt}, Final ext: ${finalExt}, Target: ${targetFilename}`);
@@ -393,17 +396,7 @@ export async function POST(request: NextRequest) {
         
         console.log(`File data size: ${fileData.length} bytes, target: ${targetFilename}`);
         const blobPath = `manifests/${targetFilename}`;
-
-        // Check if same-day manifest already exists and delete it (replace with new version)
-        try {
-          const existingBlob = await getBlobByName(blobPath);
-          if (existingBlob) {
-            await del(existingBlob.url);
-            console.log(`Replaced existing same-day manifest: ${blobPath}`);
-          }
-        } catch (delError) {
-          console.log(`No existing same-day manifest to replace`);
-        }
+        // Each manifest gets unique timestamp, no need to check for existing
 
         // Determine content type
         const blobContentType = targetFilename.endsWith('.xlsx')
