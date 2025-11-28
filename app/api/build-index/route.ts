@@ -4,8 +4,8 @@ import * as XLSX from 'xlsx';
 
 export const dynamic = 'force-dynamic';
 
-// This can take a while, increase timeout
-export const maxDuration = 60;
+// Vercel Pro: increase timeout. Free tier: 10s max
+export const maxDuration = 60; // Only works on Pro plan
 
 const INDEX_BLOB_NAME = 'tracking-index.json';
 const API_KEY = process.env.LABEL_API_KEY || 'promos-label-2024';
