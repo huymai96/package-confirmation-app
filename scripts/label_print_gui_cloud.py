@@ -1,432 +1,734 @@
 #!/usr/bin/env python3
 """
-Promos Ink - Cloud Label Print GUI
+Promos Ink - Cloud Label Print GUI v2.0
 
-This version connects to the cloud API instead of local files.
-Operators just scan - no need to select manifest folders!
+Full cloud migration - all data sourced from Promos Ink Supply Chain API.
+Maintains exact same label formats and logic as original label_print_gui.py
+
+Requirements:
+    pip install pillow python-barcode pandas requests
 
 Usage:
     python label_print_gui_cloud.py
-
-Requirements:
-    pip install tkinter (usually included with Python)
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox
-import json
 import os
+import io
+import re
+import csv
+import json
+import tempfile
+from datetime import datetime
+from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
-from datetime import datetime
-import subprocess
-import tempfile
+
+import tkinter as tk
+from tkinter import messagebox
+
+# Third-party libs
+from barcode import Code128
+from barcode.writer import ImageWriter
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 # ============================================
-# CONFIGURATION - Update these as needed
+# CONFIGURATION
 # ============================================
 API_URL = "https://package-confirmation-app.vercel.app/api/label-lookup"
 API_KEY = "promos-label-2024"
-SCAN_LOG_PATH = r"\\promos-dc01\data\Huy\desktop receiving tool\scan_log.csv"
 
-# Label configuration
-LABEL_WIDTH_INCHES = 4
-LABEL_HEIGHT_INCHES = 6
+# Logo file - copy Pic (2).png to same directory as this script
+LOGO_PATH = "Pic (2).png"
+
+# Log file location (network share for compatibility)
+LOG_FILE = r"\\promos-dc01\data\Huy\desktop receiving tool\scan_log.csv"
+
+# Alternative local log if network unavailable
+LOCAL_LOG_FILE = "scan_log_local.csv"
 
 # ============================================
-# Cloud API Functions
+# CUSTOMER NAME NORMALIZATION
+# (Same as original)
 # ============================================
+CUSTOMER_NAME_MAPPING = {
+    "GATEWAY CDI": "Brand Addition",
+    "GatewayCDI Inc": "Brand Addition",
+    "Gateway CDI": "Brand Addition",
+    "GATEWAYCDI": "Brand Addition",
+    "Eretailing Technology Group LLC": "Fast Platform",
+    "ERETAILING TECHNOLOGY GROUP LLC": "Fast Platform",
+    "eRetailing Technology Group": "Fast Platform",
+    "Eretailing Tech Group - Cintas": "Fast Platform",
+    "Eretailing Technology Group": "Fast Platform",
+    "ADVANCED GRAPHIC PRODUCTS": "AOSWAG",
+    "Advanced Graphic Products": "AOSWAG",
+    "GetOnChat LLC": "Ooshirts",
+    "BSN SPORTS INC": "BSN Sports",
+}
 
-def lookup_package(tracking: str) -> dict:
-    """Look up package info from cloud API"""
+def normalize_customer_name(name: str) -> str:
+    raw = str(name or "").strip()
+    low = raw.lower()
+    for k, v in CUSTOMER_NAME_MAPPING.items():
+        if k.lower() in low:
+            return v
+    return raw
+
+
+# ============================================
+# PO CLASSIFICATION
+# (Same as original)
+# ============================================
+def classify_po_type(po_field: str):
+    s = str(po_field or "").strip().upper().replace(" ", "")
+    m = re.fullmatch(r"(\d{7,10})([A-Z])", s)
+    if m:
+        return "ci_package", m.group(1)
+    m = re.fullmatch(r"(\d{7,10})", s)
+    if m:
+        return "ci_plain", m.group(1)
+    if re.fullmatch(r"(\d{7,10})-\d+", s):
+        return "manifest_sub", None
+    return "unknown", None
+
+
+def parse_po_and_suffix(po_field):
+    """Special handling for Ooshirts format: '7124537 - DTG'"""
+    if " - " in str(po_field):
+        parts = str(po_field).split(" - ")
+        if len(parts) >= 2:
+            digits = parts[0].strip()
+            suffix = " - " + parts[1].strip()
+            return digits, suffix
+    
+    m = re.match(r"(\d+)(.*)", str(po_field))
+    if m:
+        digits = m.group(1)
+        suffix = m.group(2).replace("-", "").strip()
+        return digits, suffix
+    return str(po_field), ""
+
+
+# CI token pattern for inbound fallback
+CI_TOKEN_CAPTURE = re.compile(r'([89]\d{6,9})([A-Za-z])')
+
+
+# ============================================
+# CLOUD API FUNCTIONS
+# ============================================
+def api_request(action: str, params: dict = None) -> dict:
+    """Make request to cloud API"""
     try:
-        url = f"{API_URL}?action=lookup&tracking={tracking}&key={API_KEY}"
+        query = f"?action={action}&key={API_KEY}"
+        if params:
+            for k, v in params.items():
+                query += f"&{k}={v}"
+        
+        url = API_URL + query
         req = Request(url)
         req.add_header('x-api-key', API_KEY)
         
-        with urlopen(req, timeout=10) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            return data
+        with urlopen(req, timeout=15) as response:
+            return json.loads(response.read().decode('utf-8'))
     except HTTPError as e:
-        print(f"HTTP Error: {e.code}")
-        return {"found": False, "tracking": tracking, "error": f"HTTP {e.code}"}
+        print(f"API HTTP Error: {e.code}")
+        return {"error": f"HTTP {e.code}"}
     except URLError as e:
-        print(f"URL Error: {e.reason}")
-        return {"found": False, "tracking": tracking, "error": str(e.reason)}
+        print(f"API URL Error: {e.reason}")
+        return {"error": str(e.reason)}
     except Exception as e:
-        print(f"Error: {e}")
-        return {"found": False, "tracking": tracking, "error": str(e)}
+        print(f"API Error: {e}")
+        return {"error": str(e)}
 
 
-def log_scan(tracking: str, po: str, customer: str, source: str):
-    """Log scan to local CSV file"""
+def lookup_tracking(tracking: str) -> dict:
+    """Look up package by tracking number"""
+    return api_request("lookup", {"tracking": tracking})
+
+
+def lookup_order_info(po: str) -> dict:
+    """Look up CustomInk order info by PO"""
+    return api_request("orderInfo", {"po": po})
+
+
+def lookup_fast_platform(po: str) -> dict:
+    """Look up Fast Platform info by PO"""
+    return api_request("fastPlatform", {"po": po})
+
+
+def check_api_health() -> bool:
+    """Check if API is reachable"""
+    result = api_request("health")
+    return result.get("status") == "ok"
+
+
+# ============================================
+# LOGGING
+# (Same as original)
+# ============================================
+def log_scan(tracking, po, extra, status):
+    """Log scan to CSV file"""
+    # Try network path first, fall back to local
+    log_path = LOG_FILE
     try:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        line = f"{timestamp},{tracking},{po},{customer},{source}\n"
-        
-        # Create file with header if doesn't exist
-        if not os.path.exists(SCAN_LOG_PATH):
-            with open(SCAN_LOG_PATH, 'w') as f:
-                f.write("timestamp,tracking,po,customer,source\n")
-        
-        with open(SCAN_LOG_PATH, 'a') as f:
-            f.write(line)
-            
-        print(f"Logged: {tracking}")
-    except Exception as e:
-        print(f"Error logging scan: {e}")
-
-
-# ============================================
-# Label Printing
-# ============================================
-
-def generate_label_zpl(tracking: str, po: str, customer: str, source: str) -> str:
-    """Generate ZPL code for Zebra printer"""
-    # Clean strings
-    po_clean = (po or "N/A")[:30]
-    customer_clean = (customer or "N/A")[:35]
-    source_clean = (source or "Unknown")[:20]
-    date_str = datetime.now().strftime("%m/%d/%Y")
+        # Test if network path is accessible
+        Path(LOG_FILE).parent.exists()
+    except Exception:
+        log_path = LOCAL_LOG_FILE
     
-    zpl = f"""
-^XA
-^FO50,30^A0N,35,35^FD*** PROMOS INK ***^FS
-^FO50,80^A0N,25,25^FDDate: {date_str}^FS
-
-^FO50,130^A0N,30,30^FDPO: {po_clean}^FS
-^FO50,180^A0N,25,25^FDCustomer: {customer_clean}^FS
-^FO50,230^A0N,20,20^FDSource: {source_clean}^FS
-
-^FO50,290^BY3
-^BCN,100,Y,N,N
-^FD{tracking}^FS
-
-^FO50,430^A0N,25,25^FD{tracking}^FS
-
-^XZ
-"""
-    return zpl
-
-
-def print_label(tracking: str, po: str, customer: str, source: str, printer_name: str = None):
-    """Print label to Zebra printer"""
     try:
-        zpl = generate_label_zpl(tracking, po, customer, source)
-        
-        # Write to temp file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.zpl', delete=False) as f:
-            f.write(zpl)
-            temp_path = f.name
-        
-        # Print based on OS
-        if os.name == 'nt':  # Windows
-            if printer_name:
-                # Print to specific printer
-                os.system(f'copy /b "{temp_path}" "{printer_name}"')
-            else:
-                # Use default printer
-                os.startfile(temp_path, 'print')
-        else:  # Linux/Mac
-            if printer_name:
-                subprocess.run(['lpr', '-P', printer_name, temp_path])
-            else:
-                subprocess.run(['lpr', temp_path])
-        
-        # Cleanup
-        try:
-            os.remove(temp_path)
-        except:
-            pass
-            
-        return True
+        log_exists = Path(log_path).exists()
+        with open(log_path, mode="a", newline="", encoding="utf-8") as logfile:
+            writer = csv.writer(logfile)
+            if not log_exists:
+                writer.writerow(["Timestamp", "Tracking/LPN", "PO#", "Department/Customer", "Due Date", "Status"])
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            writer.writerow([now, tracking, po, extra.get("name", ""), extra.get("due", ""), status])
     except Exception as e:
-        print(f"Print error: {e}")
+        print(f"Log error: {e}")
+
+
+# ============================================
+# LABEL PRINTING FUNCTIONS
+# (Same formats as original)
+# ============================================
+def load_logo():
+    """Load logo image if available"""
+    try:
+        if Path(LOGO_PATH).exists():
+            return Image.open(LOGO_PATH).convert("RGBA")
+    except Exception:
+        pass
+    
+    # Try in script directory
+    try:
+        script_dir = Path(__file__).parent
+        logo_path = script_dir / "Pic (2).png"
+        if logo_path.exists():
+            return Image.open(str(logo_path)).convert("RGBA")
+    except Exception:
+        pass
+    
+    return None
+
+
+def print_label(po, department, due_text, pipeline_flag=""):
+    """Standard CustomInk label - same format as original"""
+    barcode_io = io.BytesIO()
+    Code128(str(po), writer=ImageWriter()).write(barcode_io)
+    barcode_img = Image.open(barcode_io)
+    label_img = Image.new("RGB", (400, 280), "white")
+    y = 0
+    
+    logo = load_logo()
+    if logo:
+        lw, lh = logo.size
+        ratio = min(380 / lw, 60 / lh)
+        logo_new = logo.resize((int(lw * ratio), int(lh * ratio)))
+        label_img.paste(logo_new, (10, 0), logo_new)
+        y = 65
+    else:
+        y = 10
+    
+    label_img.paste(barcode_img.resize((320, 70)), (40, y + 5))
+    draw = ImageDraw.Draw(label_img)
+    
+    try:
+        font_large = ImageFont.truetype("arial.ttf", 28)
+        font_med = ImageFont.truetype("arial.ttf", 23)
+        font_due = ImageFont.truetype("arial.ttf", 22)
+        font_flag = ImageFont.truetype("arial.ttf", 20)
+    except Exception:
+        font_large = font_med = font_due = font_flag = ImageFont.load_default()
+    
+    draw.text((40, y + 85), f"PO#: {po}", fill="black", font=font_large)
+    if department:
+        draw.text((40, y + 115), f"{department}", fill="black", font=font_med)
+    if due_text:
+        draw.text((40, y + 145), f"Due: {due_text}", fill="black", font=font_due)
+    if pipeline_flag:
+        draw.text((40, y + 175), pipeline_flag, fill="black", font=font_flag)
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        label_img.save(tmp.name)
+        try:
+            os.startfile(tmp.name, "print")
+        except Exception as e:
+            messagebox.showerror("Print error", f"Could not send label to printer:\n{e}")
+
+
+def print_manifest_label(po, customer, due_text=None, pipeline_flag=""):
+    """Manifest label for non-CI orders - same format as original"""
+    barcode_io = io.BytesIO()
+    Code128(str(po), writer=ImageWriter()).write(barcode_io)
+    barcode_img = Image.open(barcode_io)
+    label_img = Image.new("RGB", (400, 250), "white")
+    
+    logo = load_logo()
+    if logo:
+        lw, lh = logo.size
+        ratio = min(380 / lw, 50 / lh)
+        logo_new = logo.resize((int(lw * ratio), int(lh * ratio)))
+        label_img.paste(logo_new, (10, 0), logo_new)
+        y = 55
+    else:
+        y = 10
+    
+    label_img.paste(barcode_img.resize((320, 70)), (40, y + 5))
+    draw = ImageDraw.Draw(label_img)
+    
+    try:
+        font_large = ImageFont.truetype("arial.ttf", 26)
+        font_med = ImageFont.truetype("arial.ttf", 22)
+        font_small = ImageFont.truetype("arial.ttf", 20)
+    except Exception:
+        font_large = font_med = font_small = ImageFont.load_default()
+    
+    draw.text((40, y + 80), f"PO#: {po}", fill="black", font=font_large)
+    draw.text((40, y + 110), f"{customer}", fill="black", font=font_med)
+    if due_text:
+        draw.text((40, y + 140), f"Due: {due_text}", fill="black", font=font_small)
+    if pipeline_flag:
+        draw.text((40, y + 165), pipeline_flag, fill="black", font=font_small)
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        label_img.save(tmp.name)
+        try:
+            os.startfile(tmp.name, "print")
+        except Exception as e:
+            messagebox.showerror("Print error", f"Could not send label to printer:\n{e}")
+
+
+def print_manifest_label_fast_platform(po, customer, due_value=None, processes_value=None):
+    """Fast Platform label - same format as original"""
+    barcode_io = io.BytesIO()
+    Code128(str(po), writer=ImageWriter()).write(barcode_io)
+    barcode_img = Image.open(barcode_io)
+    label_img = Image.new("RGB", (400, 260), "white")
+    
+    logo = load_logo()
+    if logo:
+        lw, lh = logo.size
+        ratio = min(380 / lw, 50 / lh)
+        logo_new = logo.resize((int(lw * ratio), int(lh * ratio)))
+        label_img.paste(logo_new, (10, 0), logo_new)
+        y = 55
+    else:
+        y = 10
+    
+    label_img.paste(barcode_img.resize((320, 70)), (40, y + 5))
+    draw = ImageDraw.Draw(label_img)
+    
+    try:
+        font_large = ImageFont.truetype("arial.ttf", 26)
+        font_med = ImageFont.truetype("arial.ttf", 22)
+        font_small = ImageFont.truetype("arial.ttf", 20)
+    except Exception:
+        font_large = font_med = font_small = ImageFont.load_default()
+    
+    draw.text((40, y + 80), f"PO#: {po}", fill="black", font=font_large)
+    draw.text((40, y + 110), f"{customer}", fill="black", font=font_med)
+    y_line = y + 140
+    if due_value:
+        draw.text((40, y_line), f"{due_value}", fill="black", font=font_small)
+        y_line += 25
+    if processes_value:
+        draw.text((40, y_line), f"{processes_value}", fill="black", font=font_small)
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        label_img.save(tmp.name)
+        try:
+            os.startfile(tmp.name, "print")
+        except Exception as e:
+            messagebox.showerror("Print error", f"Could not send label to printer:\n{e}")
+
+
+def print_inbound_label_generic(tracking_code: str, shipper_text: str, ref_lines: list):
+    """Inbound/unknown package label - same format as original"""
+    barcode_io = io.BytesIO()
+    Code128(str(tracking_code), writer=ImageWriter()).write(barcode_io)
+    barcode_img = Image.open(barcode_io)
+    label_img = Image.new("RGB", (400, 300), "white")
+    draw = ImageDraw.Draw(label_img)
+    y = 10
+    
+    logo = load_logo()
+    if logo:
+        lw, lh = logo.size
+        ratio = min(380 / lw, 50 / lh)
+        logo_new = logo.resize((int(lw * ratio), int(lh * ratio)))
+        label_img.paste(logo_new, (10, 0), logo_new)
+        y = 55
+    
+    try:
+        font_small = ImageFont.truetype("arial.ttf", 18)
+    except Exception:
+        font_small = ImageFont.load_default()
+    
+    bw, bh = barcode_img.size
+    ratio = min(340 / bw, 80 / bh)
+    barcode_resized = barcode_img.resize((int(bw * ratio), int(bh * ratio)))
+    label_img.paste(barcode_resized, (30, y), None)
+    y += int(bh * ratio) + 5
+    
+    # Add shipper header
+    if shipper_text:
+        shipper_header = shipper_text.split(",")[0].strip()
+        draw.text((40, y), shipper_header, fill="black", font=font_small)
+        y += 20
+    
+    # Add each reference token on a new line
+    for token in ref_lines:
+        token = (token or "").strip()
+        if token:
+            parts = token.split("|")
+            for part in parts:
+                part = part.strip()
+                if part:
+                    draw.text((40, y), part, fill="black", font=font_small)
+                    y += 18
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        label_img.save(tmp.name)
+        try:
+            os.startfile(tmp.name, "print")
+        except Exception as e:
+            messagebox.showerror("Print error", f"Could not send label to printer:\n{e}")
+
+
+# ============================================
+# MAIN PROCESSING LOGIC
+# (Same logic as original, using cloud data)
+# ============================================
+def process_tracking(tracking: str) -> bool:
+    """
+    Process a scanned tracking number.
+    Returns True if handled, False if not found.
+    """
+    if not tracking:
         return False
+    
+    tracking = tracking.strip()
+    
+    # Look up in cloud
+    result = lookup_tracking(tracking)
+    
+    if result.get("error"):
+        messagebox.showerror("API Error", f"Could not connect to cloud:\n{result['error']}")
+        return False
+    
+    if not result.get("found"):
+        # Not found in any manifest
+        log_scan(tracking, "", {"name": "", "due": ""}, "Not Found")
+        messagebox.showwarning("Not Found", 
+            "No PO# found in cloud manifests.\n\n"
+            "Package not in SanMar, S&S, CustomInk orders, or inbound file.")
+        return False
+    
+    # Extract data from API response
+    source_type = result.get("sourceType", "unknown")
+    po_manifest = result.get("po", "")
+    customer = result.get("customer", "")
+    department = result.get("department", "")
+    due_date = result.get("dueDate", "")
+    status = result.get("status", "")
+    must_ship_by = result.get("mustShipBy", "")
+    processes = result.get("processes", "")
+    shipper_name = result.get("shipperName", "")
+    ref_tokens = result.get("referenceTokens", [])
+    
+    # Normalize customer name
+    customer_norm = normalize_customer_name(customer)
+    
+    # Determine pipeline flag from status
+    pipeline_flag = ""
+    if status:
+        status_lower = status.lower()
+        if "on hold" in status_lower:
+            pipeline_flag = "On Hold"
+        elif any(k in status_lower for k in ["pipelined", "pipeline", "pending"]):
+            pipeline_flag = "Pipelined"
+    
+    # Format due date
+    if due_date:
+        try:
+            from datetime import datetime as dt
+            parsed = dt.strptime(due_date, "%Y-%m-%d")
+            due_date = parsed.strftime("%a, %b %d")
+        except Exception:
+            pass
+    
+    # --- SANMAR / S&S MANIFEST FOUND ---
+    if source_type in ("sanmar", "ss"):
+        po_type, base_digits = classify_po_type(po_manifest)
+        
+        # Special handling for Ooshirts
+        if customer_norm.lower().startswith("ooshirts"):
+            po_digits, po_suffix = parse_po_and_suffix(po_manifest)
+            if po_digits:
+                label_customer = customer_norm + (po_suffix if po_suffix else "")
+                print_label(po_digits, label_customer, due_date or "", pipeline_flag=pipeline_flag)
+                log_scan(tracking, po_digits, {"name": label_customer, "due": due_date or ""}, "Printed")
+                return True
+        
+        # CI order with department found
+        if po_type in ("ci_plain", "ci_package") and base_digits and department:
+            print_label(base_digits, department, due_date or "", pipeline_flag=pipeline_flag)
+            log_scan(tracking, base_digits, {"name": department, "due": due_date or ""}, "Printed")
+            return True
+        
+        # Fast Platform customer
+        if customer_norm.lower() == "fast platform":
+            # Use must_ship_by and processes from API if available
+            print_manifest_label_fast_platform(
+                po_manifest, 
+                customer_norm, 
+                due_value=must_ship_by or "", 
+                processes_value=processes or ""
+            )
+            log_scan(tracking, po_manifest, {"name": customer_norm, "due": must_ship_by or ""}, "Fast Platform Manifest Print")
+            return True
+        
+        # Default manifest label
+        print_manifest_label(po_manifest, customer_norm, due_text=due_date or "", pipeline_flag=pipeline_flag)
+        log_scan(tracking, po_manifest, {"name": customer_norm, "due": due_date or ""}, "Manifest Print")
+        return True
+    
+    # --- INBOUND MANIFEST FOUND ---
+    if source_type == "inbound":
+        # Try to find CI order from reference tokens
+        if department:
+            # API already found a CI match
+            po_digits = result.get("po", "")
+            print_label(po_digits, department, due_date or "", pipeline_flag=pipeline_flag)
+            log_scan(tracking, po_digits, {"name": department, "due": due_date or ""}, "Inbound→CI Fallback")
+            return True
+        
+        # No CI match - print generic inbound label
+        print_inbound_label_generic(
+            tracking_code=tracking,
+            shipper_text=shipper_name,
+            ref_lines=ref_tokens
+        )
+        log_scan(tracking, "", {"name": shipper_name.split(",")[0] if shipper_name else "", "due": ""}, "Inbound Generic")
+        return True
+    
+    # --- CUSTOMINK ORDERS DIRECT MATCH ---
+    if source_type == "customink":
+        print_label(po_manifest, department or customer_norm, due_date or "", pipeline_flag=pipeline_flag)
+        log_scan(tracking, po_manifest, {"name": department or customer_norm, "due": due_date or ""}, "CustomInk Direct")
+        return True
+    
+    # Unknown source type - default manifest label
+    print_manifest_label(po_manifest or tracking, customer_norm or "Unknown", due_text=due_date)
+    log_scan(tracking, po_manifest or tracking, {"name": customer_norm, "due": due_date or ""}, "Unknown Source")
+    return True
 
 
 # ============================================
-# GUI Application
+# GUI APPLICATION
 # ============================================
-
 class LabelPrintApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Promos Ink - Label Print (Cloud)")
-        self.root.geometry("700x600")
-        self.root.configure(bg='#1a1a2e')
+        self.root.title("Promos Ink - Scan & Print Label App (Cloud)")
+        self.root.geometry("520x450")
+        self.root.resizable(False, False)
         
-        # Variables
-        self.tracking_var = tk.StringVar()
-        self.status_var = tk.StringVar(value="Ready - Scan a package")
-        self.auto_print_var = tk.BooleanVar(value=True)
+        # Colors
+        self.bg_color = "#f5f7fa"
+        self.frame_color = "#ffffff"
+        
+        self.root.configure(bg=self.bg_color)
+        
+        # Main frame
+        self.frame = tk.Frame(root, bg=self.frame_color, bd=2, relief="groove")
+        self.frame.place(relx=0.5, rely=0, anchor="n", y=15, width=490, height=420)
         
         self.setup_ui()
-        
-        # Focus on entry
-        self.tracking_entry.focus_set()
+        self.check_connection()
     
     def setup_ui(self):
-        # Title
-        title_frame = tk.Frame(self.root, bg='#1a1a2e')
-        title_frame.pack(fill='x', pady=20)
+        # Logo
+        try:
+            logo = load_logo()
+            if logo:
+                logo_resized = logo.resize((220, 72))
+                self.logo_photo = ImageTk.PhotoImage(logo_resized)
+                lbl = tk.Label(self.frame, image=self.logo_photo, bg=self.frame_color)
+                lbl.pack(pady=(10, 5))
+            else:
+                raise Exception("No logo")
+        except Exception:
+            tk.Label(
+                self.frame, 
+                text="Promos Ink", 
+                font=("Arial", 15, "bold"), 
+                bg=self.frame_color
+            ).pack(pady=(18, 5))
         
-        tk.Label(
-            title_frame, 
-            text="📦 Promos Ink Label Print",
-            font=('Segoe UI', 24, 'bold'),
-            fg='#4fc3f7',
-            bg='#1a1a2e'
-        ).pack()
+        # Cloud status
+        self.status_frame = tk.Frame(self.frame, bg=self.frame_color)
+        self.status_frame.pack(pady=(5, 10))
         
-        tk.Label(
-            title_frame,
-            text="☁️ Connected to Cloud",
-            font=('Segoe UI', 10),
-            fg='#81c784',
-            bg='#1a1a2e'
-        ).pack()
-        
-        # Scan input
-        input_frame = tk.Frame(self.root, bg='#1a1a2e')
-        input_frame.pack(fill='x', padx=40, pady=20)
-        
-        tk.Label(
-            input_frame,
-            text="Scan Tracking Number:",
-            font=('Segoe UI', 12),
-            fg='white',
-            bg='#1a1a2e'
-        ).pack(anchor='w')
-        
-        self.tracking_entry = tk.Entry(
-            input_frame,
-            textvariable=self.tracking_var,
-            font=('Consolas', 18),
-            bg='#2d2d44',
-            fg='white',
-            insertbackground='white',
-            relief='flat',
-            width=35
+        self.cloud_indicator = tk.Label(
+            self.status_frame,
+            text="☁️ Checking cloud connection...",
+            font=("Arial", 10),
+            fg="#666666",
+            bg=self.frame_color
         )
-        self.tracking_entry.pack(fill='x', pady=10, ipady=10)
-        self.tracking_entry.bind('<Return>', self.on_scan)
+        self.cloud_indicator.pack()
         
-        # Auto-print checkbox
-        tk.Checkbutton(
-            input_frame,
-            text="Auto-print label after scan",
-            variable=self.auto_print_var,
-            font=('Segoe UI', 10),
-            fg='white',
-            bg='#1a1a2e',
-            selectcolor='#2d2d44',
-            activebackground='#1a1a2e',
-            activeforeground='white'
-        ).pack(anchor='w')
-        
-        # Buttons
-        btn_frame = tk.Frame(self.root, bg='#1a1a2e')
-        btn_frame.pack(fill='x', padx=40, pady=10)
-        
-        tk.Button(
-            btn_frame,
-            text="🔍 Look Up",
-            command=self.on_scan,
-            font=('Segoe UI', 12, 'bold'),
-            bg='#4fc3f7',
-            fg='white',
-            relief='flat',
-            padx=20,
-            pady=10,
-            cursor='hand2'
-        ).pack(side='left', padx=5)
-        
-        tk.Button(
-            btn_frame,
-            text="🖨️ Print Label",
-            command=self.on_print,
-            font=('Segoe UI', 12, 'bold'),
-            bg='#81c784',
-            fg='white',
-            relief='flat',
-            padx=20,
-            pady=10,
-            cursor='hand2'
-        ).pack(side='left', padx=5)
-        
-        tk.Button(
-            btn_frame,
-            text="🗑️ Clear",
-            command=self.on_clear,
-            font=('Segoe UI', 12),
-            bg='#ef5350',
-            fg='white',
-            relief='flat',
-            padx=20,
-            pady=10,
-            cursor='hand2'
-        ).pack(side='left', padx=5)
-        
-        # Results display
-        result_frame = tk.Frame(self.root, bg='#2d2d44', relief='flat')
-        result_frame.pack(fill='both', expand=True, padx=40, pady=20)
-        
+        # Instructions
         tk.Label(
-            result_frame,
-            text="Package Information",
-            font=('Segoe UI', 12, 'bold'),
-            fg='#4fc3f7',
-            bg='#2d2d44'
-        ).pack(anchor='w', padx=20, pady=10)
+            self.frame,
+            text="Scan Tracking or LPN",
+            font=("Arial", 12, "bold"),
+            bg=self.frame_color
+        ).pack(pady=(10, 5))
         
-        self.result_text = tk.Text(
-            result_frame,
-            font=('Consolas', 11),
-            bg='#1a1a2e',
-            fg='white',
-            relief='flat',
-            height=12,
-            wrap='word'
+        # Entry
+        self.entry = tk.Entry(
+            self.frame,
+            font=("Arial", 16),
+            width=36,
+            bd=3,
+            relief="solid",
+            justify="center"
         )
-        self.result_text.pack(fill='both', expand=True, padx=20, pady=(0, 20))
+        self.entry.pack(pady=(8, 5))
+        self.entry.bind("<Return>", self.on_scan)
         
-        # Status bar
-        status_frame = tk.Frame(self.root, bg='#0d0d1a')
-        status_frame.pack(fill='x', side='bottom')
-        
+        # Help text
         tk.Label(
-            status_frame,
-            textvariable=self.status_var,
-            font=('Segoe UI', 10),
-            fg='#aaa',
-            bg='#0d0d1a',
-            pady=10
-        ).pack()
+            self.frame,
+            text="(Scan while cursor is in the box; label prints instantly)",
+            bg=self.frame_color,
+            font=("Arial", 9, "italic"),
+            fg="#777777"
+        ).pack(pady=(2, 10))
         
-        # Store current package data
-        self.current_package = None
+        # Result display
+        self.result_frame = tk.Frame(self.frame, bg="#e8f5e9", bd=1, relief="solid")
+        self.result_frame.pack(fill="x", padx=20, pady=10)
+        
+        self.result_label = tk.Label(
+            self.result_frame,
+            text="Ready to scan...",
+            font=("Arial", 11),
+            bg="#e8f5e9",
+            fg="#2e7d32",
+            wraplength=440,
+            justify="center"
+        )
+        self.result_label.pack(pady=10, padx=10)
+        
+        # Manual lookup button
+        btn_frame = tk.Frame(self.frame, bg=self.frame_color)
+        btn_frame.pack(pady=10)
+        
+        tk.Button(
+            btn_frame,
+            text="🔍 Manual Lookup",
+            font=("Arial", 10),
+            command=self.on_manual_lookup,
+            width=15
+        ).pack(side="left", padx=5)
+        
+        tk.Button(
+            btn_frame,
+            text="🔄 Refresh",
+            font=("Arial", 10),
+            command=self.check_connection,
+            width=10
+        ).pack(side="left", padx=5)
+    
+    def check_connection(self):
+        """Check cloud API connection"""
+        self.cloud_indicator.config(text="☁️ Checking connection...", fg="#666666")
+        self.root.update()
+        
+        if check_api_health():
+            self.cloud_indicator.config(text="☁️ Connected to Cloud", fg="#4caf50")
+            self.entry.configure(state="normal")
+            self.entry.focus()
+        else:
+            self.cloud_indicator.config(text="❌ Cloud Offline - Check Internet", fg="#f44336")
+            self.entry.configure(state="disabled")
     
     def on_scan(self, event=None):
-        tracking = self.tracking_var.get().strip()
+        """Handle scan/enter event"""
+        tracking = self.entry.get().strip()
         if not tracking:
-            self.status_var.set("⚠️ Please scan or enter a tracking number")
             return
         
-        self.status_var.set(f"🔍 Looking up {tracking}...")
+        self.result_label.config(
+            text=f"🔍 Looking up {tracking}...",
+            bg="#fff3e0",
+            fg="#e65100"
+        )
         self.root.update()
         
-        # Look up in cloud
-        result = lookup_package(tracking)
-        
-        # Display result
-        self.result_text.delete('1.0', tk.END)
-        
-        if result.get('found'):
-            self.current_package = result
+        try:
+            success = process_tracking(tracking)
             
-            info = f"""✅ PACKAGE FOUND
-
-Tracking:  {result.get('tracking', 'N/A')}
-Source:    {result.get('source', 'Unknown').upper()}
-PO #:      {result.get('po', 'N/A')}
-Customer:  {result.get('customer', 'N/A')}
-"""
-            self.result_text.insert('1.0', info)
-            self.result_text.tag_add('found', '1.0', '1.end')
-            self.result_text.tag_config('found', foreground='#81c784')
-            
-            self.status_var.set(f"✅ Found in {result.get('source', 'manifest')}")
-            
-            # Log the scan
-            log_scan(
-                tracking,
-                result.get('po', ''),
-                result.get('customer', ''),
-                result.get('source', 'unknown')
-            )
-            
-            # Auto-print if enabled
-            if self.auto_print_var.get():
-                self.on_print()
-        else:
-            self.current_package = {
-                'tracking': tracking,
-                'found': False
-            }
-            
-            info = f"""❌ PACKAGE NOT FOUND
-
-Tracking: {tracking}
-
-This package was not found in any manifest.
-It may be a new shipment or not yet uploaded.
-
-You can still print a basic label.
-"""
-            self.result_text.insert('1.0', info)
-            self.result_text.tag_add('notfound', '1.0', '1.end')
-            self.result_text.tag_config('notfound', foreground='#ef5350')
-            
-            self.status_var.set("❌ Not found in manifests")
-        
-        # Clear and refocus for next scan
-        self.tracking_var.set('')
-        self.tracking_entry.focus_set()
-    
-    def on_print(self):
-        if not self.current_package:
-            self.status_var.set("⚠️ No package to print - scan first")
-            return
-        
-        tracking = self.current_package.get('tracking', '')
-        po = self.current_package.get('po', '')
-        customer = self.current_package.get('customer', '')
-        source = self.current_package.get('source', 'Unknown')
-        
-        self.status_var.set(f"🖨️ Printing label for {tracking}...")
-        self.root.update()
-        
-        success = print_label(tracking, po, customer, source)
-        
-        if success:
-            self.status_var.set(f"✅ Label printed for {tracking}")
-        else:
-            self.status_var.set(f"❌ Print failed - check printer connection")
-    
-    def on_clear(self):
-        self.tracking_var.set('')
-        self.result_text.delete('1.0', tk.END)
-        self.current_package = None
-        self.status_var.set("Ready - Scan a package")
-        self.tracking_entry.focus_set()
-
-
-# ============================================
-# Main
-# ============================================
-
-def main():
-    # Check API connection
-    print("Checking cloud connection...")
-    try:
-        test_url = f"{API_URL}?action=health"
-        with urlopen(test_url, timeout=5) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            if data.get('status') == 'ok':
-                print("✓ Cloud API connected")
+            if success:
+                self.result_label.config(
+                    text=f"✅ Processed: {tracking}",
+                    bg="#e8f5e9",
+                    fg="#2e7d32"
+                )
             else:
-                print("⚠ Cloud API responded but status unknown")
-    except Exception as e:
-        print(f"⚠ Could not connect to cloud API: {e}")
-        print("  The app will still work but lookups may fail.")
+                self.result_label.config(
+                    text=f"❌ Not found: {tracking}",
+                    bg="#ffebee",
+                    fg="#c62828"
+                )
+        except Exception as e:
+            self.result_label.config(
+                text=f"⚠️ Error: {str(e)[:50]}",
+                bg="#ffebee",
+                fg="#c62828"
+            )
+        
+        # Clear and refocus
+        self.entry.delete(0, tk.END)
+        self.entry.focus()
     
-    # Start GUI
+    def on_manual_lookup(self):
+        """Manual lookup button handler"""
+        tracking = self.entry.get().strip()
+        if tracking:
+            self.on_scan()
+        else:
+            messagebox.showinfo("Manual Lookup", "Enter a tracking number first, then click Lookup.")
+
+
+# ============================================
+# MAIN
+# ============================================
+def main():
+    print("=" * 50)
+    print("Promos Ink - Cloud Label Print GUI v2.0")
+    print("=" * 50)
+    print()
+    print("Checking cloud API...")
+    
+    if check_api_health():
+        print("✓ Cloud API connected")
+    else:
+        print("⚠ Could not connect to cloud API")
+        print("  Check your internet connection.")
+        print("  The app will still start but lookups may fail.")
+    
+    print()
+    print("Starting GUI...")
+    
     root = tk.Tk()
     app = LabelPrintApp(root)
     root.mainloop()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-
