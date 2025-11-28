@@ -911,8 +911,8 @@ export default function Home() {
               }`}
             >
               <ArrowDownToLine className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span className="hidden xs:inline">Inbound</span>
-              <span className="xs:hidden">In</span>
+              <span className="hidden sm:inline">Inbound</span>
+              <span className="sm:hidden">In</span>
             </button>
             <button
               onClick={() => setActiveTab('outbound')}
@@ -923,8 +923,8 @@ export default function Home() {
               }`}
             >
               <ArrowUpFromLine className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span className="hidden xs:inline">Outbound</span>
-              <span className="xs:hidden">Out</span>
+              <span className="hidden sm:inline">Outbound</span>
+              <span className="sm:hidden">Out</span>
             </button>
             <button
               onClick={() => setActiveTab('suppliers')}
@@ -958,8 +958,8 @@ export default function Home() {
               }`}
             >
               <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span className="hidden sm:inline">Reports</span>
-              <span className="sm:hidden">📊</span>
+              <span className="hidden md:inline">Reports</span>
+              <span className="md:hidden">📊</span>
             </button>
             <button
               onClick={() => setActiveTab('quantum')}
