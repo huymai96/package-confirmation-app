@@ -3,7 +3,11 @@ import { put, list, del } from '@vercel/blob';
 
 export const dynamic = 'force-dynamic';
 
-// Webhook secret for security
+// Webhook secret for security (set in Vercel env vars)
+// Security model:
+// 1. Make.com Mailhook URL is secret (only receiving@promosink.com knows it)
+// 2. Make.com sends to Vercel with EMAIL_WEBHOOK_SECRET header
+// 3. This endpoint validates the secret before processing
 const WEBHOOK_SECRET = process.env.EMAIL_WEBHOOK_SECRET || 'promos-ink-email-2024';
 
 // Map sender/subject patterns to manifest types
