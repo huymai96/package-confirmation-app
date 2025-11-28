@@ -17,11 +17,50 @@ import io
 import re
 import csv
 import json
+import sys
 import tempfile
+import traceback
 from datetime import datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
+
+# Check for required dependencies before importing
+def check_dependencies():
+    missing = []
+    
+    try:
+        import tkinter
+    except ImportError:
+        missing.append("tkinter (usually included with Python)")
+    
+    try:
+        from PIL import Image
+    except ImportError:
+        missing.append("pillow (pip install pillow)")
+    
+    try:
+        from barcode import Code128
+    except ImportError:
+        missing.append("python-barcode (pip install python-barcode)")
+    
+    if missing:
+        print("=" * 50)
+        print("ERROR: Missing required packages!")
+        print("=" * 50)
+        print()
+        print("Please install the following:")
+        for pkg in missing:
+            print(f"  - {pkg}")
+        print()
+        print("Run this command:")
+        print("  pip install pillow python-barcode")
+        print()
+        input("Press Enter to exit...")
+        sys.exit(1)
+
+# Check dependencies first
+check_dependencies()
 
 import tkinter as tk
 from tkinter import messagebox
@@ -116,7 +155,7 @@ CI_TOKEN_CAPTURE = re.compile(r'([89]\d{6,9})([A-Za-z])')
 # ============================================
 # CLOUD API FUNCTIONS
 # ============================================
-def api_request(action: str, params: dict = None) -> dict:
+def api_request(action: str, params: dict = None, timeout: int = 30) -> dict:
     """Make request to cloud API"""
     try:
         query = f"?action={action}&key={API_KEY}"
@@ -128,22 +167,26 @@ def api_request(action: str, params: dict = None) -> dict:
         req = Request(url)
         req.add_header('x-api-key', API_KEY)
         
-        with urlopen(req, timeout=15) as response:
+        with urlopen(req, timeout=timeout) as response:
             return json.loads(response.read().decode('utf-8'))
     except HTTPError as e:
         print(f"API HTTP Error: {e.code}")
-        return {"error": f"HTTP {e.code}"}
+        return {"error": f"HTTP {e.code}", "timeout": False}
     except URLError as e:
-        print(f"API URL Error: {e.reason}")
-        return {"error": str(e.reason)}
+        reason = str(e.reason)
+        is_timeout = "timed out" in reason.lower()
+        print(f"API URL Error: {reason}")
+        return {"error": reason, "timeout": is_timeout}
     except Exception as e:
-        print(f"API Error: {e}")
-        return {"error": str(e)}
+        error_msg = str(e)
+        is_timeout = "timed out" in error_msg.lower()
+        print(f"API Error: {error_msg}")
+        return {"error": error_msg, "timeout": is_timeout}
 
 
 def lookup_tracking(tracking: str) -> dict:
     """Look up package by tracking number"""
-    return api_request("lookup", {"tracking": tracking})
+    return api_request("lookup", {"tracking": tracking}, timeout=45)
 
 
 def lookup_order_info(po: str) -> dict:
@@ -410,12 +453,33 @@ def process_tracking(tracking: str) -> bool:
     
     tracking = tracking.strip()
     
-    # Look up in cloud
+    # Look up in cloud (with retry on timeout)
     result = lookup_tracking(tracking)
     
     if result.get("error"):
-        messagebox.showerror("API Error", f"Could not connect to cloud:\n{result['error']}")
-        return False
+        error_msg = result.get("error", "Unknown error")
+        
+        # Handle timeout specifically
+        if result.get("timeout") or "timed out" in error_msg.lower():
+            retry = messagebox.askyesno(
+                "Connection Timeout", 
+                f"The cloud lookup timed out.\n\n"
+                f"This can happen with slow internet or large manifests.\n\n"
+                f"Would you like to retry?"
+            )
+            if retry:
+                # Retry with longer timeout
+                result = api_request("lookup", {"tracking": tracking}, timeout=60)
+                if not result.get("error"):
+                    pass  # Continue processing below
+                else:
+                    messagebox.showerror("API Error", f"Retry failed:\n{result.get('error')}")
+                    return False
+            else:
+                return False
+        else:
+            messagebox.showerror("API Error", f"Could not connect to cloud:\n{error_msg}")
+            return False
     
     if not result.get("found"):
         # Not found in any manifest
@@ -731,4 +795,18 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print()
+        print("=" * 50)
+        print("ERROR: Application crashed!")
+        print("=" * 50)
+        print()
+        print(f"Error: {e}")
+        print()
+        print("Full traceback:")
+        traceback.print_exc()
+        print()
+        input("Press Enter to exit...")
+        sys.exit(1)
