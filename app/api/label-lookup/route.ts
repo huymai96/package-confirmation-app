@@ -159,6 +159,7 @@ export async function GET(request: NextRequest) {
         department: entry.department,
         dueDate: entry.dueDate,
         status: entry.status,
+        pipelineFlag: entry.pipelineFlag,
         shipperName: entry.shipperName,
         referenceTokens: entry.referenceTokens
       });

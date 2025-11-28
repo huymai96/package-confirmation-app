@@ -225,46 +225,98 @@ def build_index():
         except Exception as e:
             print(f"  {m['filename']}: Error - {e}")
     
-    # Process CustomInk orders
+    # Process CustomInk orders - creates order_index for PO lookup
+    # CustomInk orders have PO numbers, not tracking numbers
+    # Structure: Order #, Status, Vendor (dept), Units, Screens, Shipper, Check-In, Due Date
+    order_index = {}  # PO -> {department, dueDate, status}
+    
     ci_files = [m for m in manifests if m.get('type') == 'customink']
-    print(f"\nProcessing {len(ci_files)} CustomInk manifests...")
+    print(f"\nProcessing {len(ci_files)} CustomInk order files...")
     for m in ci_files:
         try:
             file_r = requests.get(m['url'])
             df = pd.read_excel(BytesIO(file_r.content))
             
-            tracking_col = None
-            po_col = None
-            customer_col = None
+            # Find columns by name
+            cols = {str(c).strip().lower(): c for c in df.columns}
             
-            for col in df.columns:
-                col_lower = str(col).lower()
-                if 'tracking' in col_lower:
-                    tracking_col = col
-                elif 'order' in col_lower:
-                    po_col = col
-                elif 'customer' in col_lower or 'name' in col_lower:
-                    customer_col = col
+            order_col = None
+            dept_col = None
+            due_col = None
+            status_col = None
             
-            if tracking_col:
+            for lc, real in cols.items():
+                if 'order' in lc and '#' in lc:
+                    order_col = real
+                elif lc == 'order':
+                    order_col = real
+                elif 'vendor' in lc or 'department' in lc:
+                    dept_col = real
+                elif 'due' in lc:
+                    due_col = real
+                elif 'status' in lc:
+                    status_col = real
+            
+            # Fallback to first column if no order column found
+            if not order_col and len(df.columns) > 0:
+                order_col = df.columns[0]
+            
+            if order_col:
                 count = 0
                 for _, row in df.iterrows():
-                    tracking = str(row.get(tracking_col, '')).strip()
-                    if tracking and tracking != 'nan' and len(tracking) > 5:
-                        normalized = normalize_tracking(tracking)
-                        po = str(row.get(po_col, '')).strip() if po_col else ''
-                        customer = str(row.get(customer_col, '')).strip() if customer_col else ''
-                        
-                        index[normalized] = {
-                            'source': 'customink',
-                            'sourceType': 'customink',
-                            'po': po,
-                            'customer': customer
-                        }
-                        count += 1
-                print(f"  {m['filename']}: {count} tracking numbers")
+                    order_num = str(row.get(order_col, '')).strip()
+                    if order_num and order_num != 'nan':
+                        # Normalize PO - extract just digits for matching
+                        po_normalized = re.sub(r'[^0-9]', '', order_num)
+                        if len(po_normalized) >= 7:  # Valid CI order number
+                            dept = str(row.get(dept_col, '')).strip() if dept_col else ''
+                            due = str(row.get(due_col, '')).strip() if due_col else ''
+                            status = str(row.get(status_col, '')).strip() if status_col else ''
+                            
+                            # Format due date if possible
+                            try:
+                                if due and due != 'nan':
+                                    dt = pd.to_datetime(due, errors='coerce')
+                                    if pd.notna(dt):
+                                        due = dt.strftime('%a, %b %d')
+                            except:
+                                pass
+                            
+                            # Determine pipeline flag from status
+                            pipeline_flag = ''
+                            status_lower = status.lower()
+                            if 'on hold' in status_lower:
+                                pipeline_flag = 'On Hold'
+                            elif any(k in status_lower for k in ['pipelined', 'pipeline', 'pending']):
+                                pipeline_flag = 'Pipelined'
+                            
+                            order_index[po_normalized] = {
+                                'department': dept,
+                                'dueDate': due,
+                                'status': status,
+                                'pipelineFlag': pipeline_flag
+                            }
+                            count += 1
+                print(f"  {m['filename']}: {count} orders indexed")
         except Exception as e:
             print(f"  {m['filename']}: Error - {e}")
+    
+    # Now enrich the tracking index with CustomInk order info
+    print(f"\nEnriching tracking index with CustomInk order info...")
+    enriched_count = 0
+    for tracking, entry in index.items():
+        po = entry.get('po', '')
+        if po:
+            # Extract digits from PO for matching
+            po_digits = re.sub(r'[^0-9]', '', po)
+            if po_digits in order_index:
+                order_info = order_index[po_digits]
+                entry['department'] = order_info.get('department', '')
+                entry['dueDate'] = order_info.get('dueDate', '')
+                entry['status'] = order_info.get('status', '')
+                entry['pipelineFlag'] = order_info.get('pipelineFlag', '')
+                enriched_count += 1
+    print(f"  Enriched {enriched_count} tracking entries with order info")
     
     # Process Inbound (QV) manifests
     inbound_files = [m for m in manifests if m.get('type') == 'inbound']

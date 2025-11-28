@@ -524,9 +524,9 @@ def process_tracking(tracking: str) -> bool:
     # Normalize customer name
     customer_norm = normalize_customer_name(customer)
     
-    # Determine pipeline flag from status
-    pipeline_flag = ""
-    if status:
+    # Get pipeline flag - prefer API value, fallback to local calculation
+    pipeline_flag = result.get("pipelineFlag", "")
+    if not pipeline_flag and status:
         status_lower = status.lower()
         if "on hold" in status_lower:
             pipeline_flag = "On Hold"
