@@ -94,7 +94,7 @@ export function getAllSupplierZips(): string[] {
   DEFAULT_SUPPLIERS.forEach(supplier => {
     zips.push(...supplier.zipCodes);
   });
-  return [...new Set(zips)]; // Remove duplicates
+  return Array.from(new Set(zips)); // Remove duplicates
 }
 
 // Find supplier by ZIP code
