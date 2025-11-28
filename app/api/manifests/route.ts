@@ -14,7 +14,7 @@ const MANIFEST_TYPES = {
   'ssactivewear': 's&s.xlsx',
   'inbound': 'inbound.csv',
   'quantumview': 'inbound.csv',
-  'sanmar_combined': 'sanmar_combined.xlsx',
+  'sanmar_combined': 'sanmar_combined.csv',
   'ss_combined': 'ss_combined.xlsx'
 } as const;
 

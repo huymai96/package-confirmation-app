@@ -10,7 +10,7 @@ import pandas as pd
 from io import BytesIO
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 API_BASE = "https://package-confirmation-app.vercel.app"
 API_KEY = "promos-label-2024"
@@ -37,42 +37,37 @@ def build_index():
     print(f"Found {len(manifests)} manifests in cloud")
     
     index = {}
-    sanmar_records = []  # For Sanmar combined manifest
-    ss_records = []      # For S&S combined manifest
+    sanmar_dfs = []  # For Sanmar combined manifest (original structure)
+    ss_dfs = []      # For S&S combined manifest (original structure)
     today = get_today()
     
     # Calculate 10-day cutoff
-    from datetime import timedelta
     ten_days_ago = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
     
     # Process S&S manifests
-    ss_files = [m for m in manifests if m.get('type') == 'ss']
+    ss_files = [m for m in manifests if m.get('type') == 'ss' and 'combined' not in m.get('filename', '')]
     print(f"\nProcessing {len(ss_files)} S&S manifests...")
     for m in ss_files:
         try:
             file_r = requests.get(m['url'])
             df = pd.read_excel(BytesIO(file_r.content), header=1)
             
-            # Find columns
+            # Find tracking column for index
             tracking_col = None
             po_col = None
             customer_col = None
+            ship_date_col = None
             
             for col in df.columns:
                 col_lower = str(col).lower()
                 if 'tracking' in col_lower:
                     tracking_col = col
-                elif 'po' in col_lower or 'purchase' in col_lower:
+                elif 'customer po' in col_lower:
                     po_col = col
-                elif 'customer' in col_lower or 'decorator' in col_lower or 'company' in col_lower:
+                elif 'customer name' in col_lower:
                     customer_col = col
-            
-            # Find additional columns
-            style_col = next((c for c in df.columns if 'style' in str(c).lower()), None)
-            color_col = next((c for c in df.columns if 'color' in str(c).lower()), None)
-            size_col = next((c for c in df.columns if 'size' in str(c).lower()), None)
-            qty_col = next((c for c in df.columns if 'qty' in str(c).lower() or 'quantity' in str(c).lower()), None)
-            ship_date_col = next((c for c in df.columns if 'ship' in str(c).lower() and 'date' in str(c).lower()), None)
+                elif 'ship date' in col_lower:
+                    ship_date_col = col
             
             if tracking_col:
                 count = 0
@@ -82,7 +77,6 @@ def build_index():
                         normalized = normalize_tracking(tracking)
                         po = str(row.get(po_col, '')).strip() if po_col else ''
                         customer = str(row.get(customer_col, '')).strip() if customer_col else ''
-                        ship_date = str(row.get(ship_date_col, '')).strip() if ship_date_col else ''
                         
                         index[normalized] = {
                             'source': 'ss',
@@ -90,52 +84,45 @@ def build_index():
                             'po': po,
                             'customer': customer
                         }
-                        
-                        record_date = ship_date[:10] if ship_date else today
-                        if record_date >= ten_days_ago:
-                            ss_records.append({
-                                'tracking': tracking,
-                                'po': po,
-                                'customer': customer,
-                                'shipDate': record_date,
-                                'style': str(row.get(style_col, '')).strip() if style_col else '',
-                                'color': str(row.get(color_col, '')).strip() if color_col else '',
-                                'size': str(row.get(size_col, '')).strip() if size_col else '',
-                                'qty': int(row.get(qty_col, 0)) if qty_col and pd.notna(row.get(qty_col)) else 0
-                            })
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
+            
+            # Add original dataframe for combined (filter by date if possible)
+            if ship_date_col and ship_date_col in df.columns:
+                df['_ship_date_str'] = df[ship_date_col].astype(str).str[:10]
+                df_filtered = df[df['_ship_date_str'] >= ten_days_ago].drop(columns=['_ship_date_str'])
+                if len(df_filtered) > 0:
+                    ss_dfs.append(df_filtered)
+            else:
+                ss_dfs.append(df)
+                
         except Exception as e:
             print(f"  {m['filename']}: Error - {e}")
     
     # Process Sanmar manifests
-    sanmar_files = [m for m in manifests if m.get('type') == 'sanmar']
+    sanmar_files = [m for m in manifests if m.get('type') == 'sanmar' and 'combined' not in m.get('filename', '')]
     print(f"\nProcessing {len(sanmar_files)} Sanmar manifests...")
     for m in sanmar_files:
         try:
             file_r = requests.get(m['url'])
             df = pd.read_csv(BytesIO(file_r.content))
             
-            # Find columns
+            # Find tracking column for index
             tracking_col = None
             po_col = None
             customer_col = None
+            ship_date_col = None
             
             for col in df.columns:
                 col_lower = str(col).lower()
                 if 'tracking' in col_lower:
                     tracking_col = col
-                elif 'po' in col_lower or 'purchase' in col_lower:
+                elif 'customer po' in col_lower:
                     po_col = col
-                elif 'customer' in col_lower or 'ship to' in col_lower or 'company' in col_lower:
+                elif 'customer name' in col_lower:
                     customer_col = col
-            
-            # Find additional columns
-            style_col = next((c for c in df.columns if 'style' in str(c).lower()), None)
-            color_col = next((c for c in df.columns if 'color' in str(c).lower()), None)
-            size_col = next((c for c in df.columns if 'size' in str(c).lower()), None)
-            qty_col = next((c for c in df.columns if 'qty' in str(c).lower() or 'shipped' in str(c).lower()), None)
-            ship_date_col = next((c for c in df.columns if 'ship' in str(c).lower() and 'date' in str(c).lower()), None)
+                elif 'shipdate' in col_lower:
+                    ship_date_col = col
             
             if tracking_col:
                 count = 0
@@ -145,7 +132,6 @@ def build_index():
                         normalized = normalize_tracking(tracking)
                         po = str(row.get(po_col, '')).strip() if po_col else ''
                         customer = str(row.get(customer_col, '')).strip() if customer_col else ''
-                        ship_date = str(row.get(ship_date_col, '')).strip() if ship_date_col else ''
                         
                         index[normalized] = {
                             'source': 'sanmar',
@@ -153,21 +139,18 @@ def build_index():
                             'po': po,
                             'customer': customer
                         }
-                        
-                        record_date = ship_date[:10] if ship_date else today
-                        if record_date >= ten_days_ago:
-                            sanmar_records.append({
-                                'tracking': tracking,
-                                'po': po,
-                                'customer': customer,
-                                'shipDate': record_date,
-                                'style': str(row.get(style_col, '')).strip() if style_col else '',
-                                'color': str(row.get(color_col, '')).strip() if color_col else '',
-                                'size': str(row.get(size_col, '')).strip() if size_col else '',
-                                'qty': int(row.get(qty_col, 0)) if qty_col and pd.notna(row.get(qty_col)) else 0
-                            })
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
+            
+            # Add original dataframe for combined (filter by date if possible)
+            if ship_date_col and ship_date_col in df.columns:
+                df['_ship_date_str'] = df[ship_date_col].astype(str).str[:10].str.replace('/', '-')
+                df_filtered = df[df['_ship_date_str'] >= ten_days_ago].drop(columns=['_ship_date_str'])
+                if len(df_filtered) > 0:
+                    sanmar_dfs.append(df_filtered)
+            else:
+                sanmar_dfs.append(df)
+                
         except Exception as e:
             print(f"  {m['filename']}: Error - {e}")
     
@@ -192,13 +175,6 @@ def build_index():
                 elif 'customer' in col_lower or 'name' in col_lower:
                     customer_col = col
             
-            # Find additional columns
-            style_col = next((c for c in df.columns if 'style' in str(c).lower() or 'product' in str(c).lower()), None)
-            color_col = next((c for c in df.columns if 'color' in str(c).lower()), None)
-            size_col = next((c for c in df.columns if 'size' in str(c).lower()), None)
-            qty_col = next((c for c in df.columns if 'qty' in str(c).lower() or 'quantity' in str(c).lower()), None)
-            due_date_col = next((c for c in df.columns if 'due' in str(c).lower() or 'date' in str(c).lower()), None)
-            
             if tracking_col:
                 count = 0
                 for _, row in df.iterrows():
@@ -207,7 +183,6 @@ def build_index():
                         normalized = normalize_tracking(tracking)
                         po = str(row.get(po_col, '')).strip() if po_col else ''
                         customer = str(row.get(customer_col, '')).strip() if customer_col else ''
-                        due_date = str(row.get(due_date_col, '')).strip() if due_date_col else ''
                         
                         index[normalized] = {
                             'source': 'customink',
@@ -215,7 +190,6 @@ def build_index():
                             'po': po,
                             'customer': customer
                         }
-                        
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
         except Exception as e:
@@ -242,9 +216,6 @@ def build_index():
                 elif 'shipper' in col_lower or 'from' in col_lower:
                     shipper_col = col
             
-            # Find additional columns  
-            ship_date_col = next((c for c in df.columns if 'ship' in str(c).lower() and 'date' in str(c).lower()), None)
-            
             if tracking_col:
                 count = 0
                 for _, row in df.iterrows():
@@ -253,7 +224,6 @@ def build_index():
                         normalized = normalize_tracking(tracking)
                         po = str(row.get(ref_col, '')).strip() if ref_col else ''
                         shipper = str(row.get(shipper_col, '')).strip() if shipper_col else ''
-                        ship_date = str(row.get(ship_date_col, '')).strip() if ship_date_col else ''
                         
                         index[normalized] = {
                             'source': 'inbound',
@@ -261,7 +231,6 @@ def build_index():
                             'po': po,
                             'customer': shipper
                         }
-                        
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
         except Exception as e:
@@ -273,7 +242,6 @@ def build_index():
     # Upload index
     print("\nUploading index to cloud...")
     
-    # API expects { index: {...} } format and x-api-key header
     payload = json.dumps({"index": index})
     
     response = requests.post(
@@ -292,36 +260,57 @@ def build_index():
     else:
         print(f"ERROR: {response.status_code} - {response.text}")
     
-    # Upload separate combined manifests for Sanmar and S&S
-    print(f"\nSanmar records (last 10 days): {len(sanmar_records)}")
-    print(f"S&S records (last 10 days): {len(ss_records)}")
+    # Upload combined manifests (preserving original column structure)
     
-    # Create and upload Sanmar combined Excel
-    if sanmar_records:
-        print("\nUploading Sanmar combined manifest...")
-        sanmar_df = pd.DataFrame(sanmar_records)
+    # Sanmar combined CSV (original format)
+    if sanmar_dfs:
+        print(f"\nCreating Sanmar combined manifest...")
+        sanmar_combined = pd.concat(sanmar_dfs, ignore_index=True)
+        # Remove duplicates based on tracking number
+        tracking_cols = [c for c in sanmar_combined.columns if 'tracking' in str(c).lower()]
+        if tracking_cols:
+            sanmar_combined = sanmar_combined.drop_duplicates(subset=tracking_cols, keep='first')
+        
+        print(f"  Total rows: {len(sanmar_combined)}")
+        print(f"  Columns: {list(sanmar_combined.columns)[:5]}...")
+        
         sanmar_buffer = BytesIO()
-        sanmar_df.to_excel(sanmar_buffer, index=False)
+        sanmar_combined.to_csv(sanmar_buffer, index=False)
         sanmar_buffer.seek(0)
         
         sanmar_response = requests.post(
             f"{API_BASE}/api/manifests",
             headers={'x-api-key': UPLOAD_KEY},
-            files={'file': ('sanmar_combined.xlsx', sanmar_buffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
+            files={'file': ('sanmar_combined.csv', sanmar_buffer, 'text/csv')},
             data={'type': 'sanmar_combined'}
         )
         
         if sanmar_response.status_code == 200:
-            print(f"  SUCCESS! sanmar_combined.xlsx ({len(sanmar_records)} records)")
+            print(f"  SUCCESS! sanmar_combined.csv uploaded")
         else:
             print(f"  ERROR: {sanmar_response.status_code} - {sanmar_response.text}")
     
-    # Create and upload S&S combined Excel
-    if ss_records:
-        print("\nUploading S&S combined manifest...")
-        ss_df = pd.DataFrame(ss_records)
+    # S&S combined Excel (original format with header row)
+    if ss_dfs:
+        print(f"\nCreating S&S combined manifest...")
+        ss_combined = pd.concat(ss_dfs, ignore_index=True)
+        # Remove duplicates based on tracking number
+        tracking_cols = [c for c in ss_combined.columns if 'tracking' in str(c).lower()]
+        if tracking_cols:
+            ss_combined = ss_combined.drop_duplicates(subset=tracking_cols, keep='first')
+        
+        print(f"  Total rows: {len(ss_combined)}")
+        print(f"  Columns: {list(ss_combined.columns)[:5]}...")
+        
         ss_buffer = BytesIO()
-        ss_df.to_excel(ss_buffer, index=False)
+        # Write with blank first row to match original format (header=1)
+        with pd.ExcelWriter(ss_buffer, engine='openpyxl') as writer:
+            # Write empty row first
+            pd.DataFrame([[''] * len(ss_combined.columns)], columns=ss_combined.columns).to_excel(
+                writer, index=False, header=True, sheet_name='Sheet1', startrow=0
+            )
+            # Write data starting at row 2 (after header is in row 1, data in row 2+)
+            ss_combined.to_excel(writer, index=False, header=False, sheet_name='Sheet1', startrow=2)
         ss_buffer.seek(0)
         
         ss_response = requests.post(
@@ -332,7 +321,7 @@ def build_index():
         )
         
         if ss_response.status_code == 200:
-            print(f"  SUCCESS! ss_combined.xlsx ({len(ss_records)} records)")
+            print(f"  SUCCESS! ss_combined.xlsx uploaded")
         else:
             print(f"  ERROR: {ss_response.status_code} - {ss_response.text}")
     
@@ -341,4 +330,3 @@ def build_index():
 if __name__ == "__main__":
     build_index()
     print("\nDone!")
-
