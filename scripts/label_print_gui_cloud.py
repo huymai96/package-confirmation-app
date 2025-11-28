@@ -79,11 +79,27 @@ API_KEY = "promos-label-2024"
 # Logo file - copy Pic (2).png to same directory as this script
 LOGO_PATH = "Pic (2).png"
 
-# Log file location (network share for compatibility)
-LOG_FILE = r"\\promos-dc01\data\Huy\desktop receiving tool\scan_log.csv"
+# Log file locations - try multiple paths
+LOG_FILE_PATHS = [
+    r"\\promos-dc01\data\Huy\desktop receiving tool\scan_log.csv",
+    r"\\192.168.2.5\data\Huy\desktop receiving tool\scan_log.csv",
+]
 
 # Alternative local log if network unavailable
 LOCAL_LOG_FILE = "scan_log_local.csv"
+
+def get_log_path():
+    """Find a working log file path"""
+    for path in LOG_FILE_PATHS:
+        try:
+            # Check if parent directory exists
+            parent = Path(path).parent
+            if parent.exists():
+                return path
+        except Exception:
+            continue
+    # Fallback to local
+    return LOCAL_LOG_FILE
 
 # ============================================
 # CUSTOMER NAME NORMALIZATION
@@ -185,8 +201,8 @@ def api_request(action: str, params: dict = None, timeout: int = 30) -> dict:
 
 
 def lookup_tracking(tracking: str) -> dict:
-    """Look up package by tracking number"""
-    return api_request("lookup", {"tracking": tracking}, timeout=45)
+    """Look up package by tracking number - INSTANT with pre-built index"""
+    return api_request("lookup", {"tracking": tracking}, timeout=10)
 
 
 def lookup_order_info(po: str) -> dict:
@@ -211,13 +227,7 @@ def check_api_health() -> bool:
 # ============================================
 def log_scan(tracking, po, extra, status):
     """Log scan to CSV file"""
-    # Try network path first, fall back to local
-    log_path = LOG_FILE
-    try:
-        # Test if network path is accessible
-        Path(LOG_FILE).parent.exists()
-    except Exception:
-        log_path = LOCAL_LOG_FILE
+    log_path = get_log_path()
     
     try:
         log_exists = Path(log_path).exists()
@@ -228,7 +238,17 @@ def log_scan(tracking, po, extra, status):
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             writer.writerow([now, tracking, po, extra.get("name", ""), extra.get("due", ""), status])
     except Exception as e:
-        print(f"Log error: {e}")
+        # Try local fallback
+        try:
+            log_exists = Path(LOCAL_LOG_FILE).exists()
+            with open(LOCAL_LOG_FILE, mode="a", newline="", encoding="utf-8") as logfile:
+                writer = csv.writer(logfile)
+                if not log_exists:
+                    writer.writerow(["Timestamp", "Tracking/LPN", "PO#", "Department/Customer", "Due Date", "Status"])
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                writer.writerow([now, tracking, po, extra.get("name", ""), extra.get("due", ""), status])
+        except Exception as e2:
+            print(f"Log error: {e2}")
 
 
 # ============================================

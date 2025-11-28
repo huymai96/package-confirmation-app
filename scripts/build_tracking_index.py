@@ -28,7 +28,20 @@ except ImportError:
 # ============================================
 # CONFIGURATION
 # ============================================
-MANIFEST_DIR = r"\\promos-dc01\data\Huy\desktop receiving tool"
+# Try multiple paths (different computers use different names)
+MANIFEST_DIRS = [
+    r"\\192.168.2.5\data\Huy\desktop receiving tool",
+    r"\\promos-dc01\data\Huy\desktop receiving tool",
+]
+
+def get_manifest_dir():
+    """Find a working manifest directory"""
+    for path in MANIFEST_DIRS:
+        if Path(path).exists():
+            return path
+    return None
+
+MANIFEST_DIR = get_manifest_dir()
 API_URL = "https://package-confirmation-app.vercel.app"
 API_KEY = "promos-label-2024"
 
@@ -158,10 +171,17 @@ def build_index_from_local():
         'total': 0
     }
     
-    manifest_dir = Path(MANIFEST_DIR)
-    if not manifest_dir.exists():
-        print(f"Error: Manifest directory not found: {MANIFEST_DIR}")
+    # Find working manifest directory
+    manifest_dir_path = get_manifest_dir()
+    if not manifest_dir_path:
+        print("Error: Could not find manifest directory!")
+        print("Tried:")
+        for p in MANIFEST_DIRS:
+            print(f"  - {p}")
         return None, None
+    
+    manifest_dir = Path(manifest_dir_path)
+    print(f"Using manifest directory: {manifest_dir_path}")
     
     # First, build order index from CustomInk orders
     order_index = {}

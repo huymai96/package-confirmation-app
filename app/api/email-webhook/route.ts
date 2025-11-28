@@ -315,11 +315,44 @@ export async function POST(request: NextRequest) {
       }
       
       // Check if content is base64 or raw text
-      // Base64 typically doesn't have newlines or CSV-like content at start
-      const isRawText = attachment.content.includes('\n') || 
-                        attachment.content.startsWith('"') ||
-                        attachment.content.includes(',');
-      console.log(`Attachment content type: ${isRawText ? 'raw text' : 'base64'}`);
+      // Better detection: base64 for Excel files should decode to bytes starting with 'PK' (ZIP signature)
+      // CSV/text files should be obvious from content
+      let isRawText = false;
+      
+      // If it looks like CSV (starts with typical CSV patterns)
+      const trimmedContent = attachment.content.trim();
+      const firstLine = trimmedContent.split('\n')[0] || '';
+      
+      if (originalExt === 'csv' || originalExt === 'txt') {
+        // For CSV files, likely raw text
+        isRawText = true;
+      } else if (originalExt === 'xlsx' || originalExt === 'xls') {
+        // For Excel files, should be base64
+        // Try to decode and check for ZIP signature (PK)
+        try {
+          // Remove any whitespace/newlines from base64 (MIME format)
+          const cleanBase64 = attachment.content.replace(/[\r\n\s]/g, '');
+          const testDecode = Buffer.from(cleanBase64.slice(0, 100), 'base64');
+          // ZIP files (and XLSX) start with 'PK' (0x50 0x4B)
+          if (testDecode[0] === 0x50 && testDecode[1] === 0x4B) {
+            isRawText = false;
+            // Update content to cleaned version for later decoding
+            attachment.content = cleanBase64;
+            console.log('Detected valid base64 Excel file (ZIP signature found)');
+          } else {
+            // Not a valid ZIP, might be corrupted or raw text
+            isRawText = firstLine.includes(',') || firstLine.startsWith('"');
+          }
+        } catch {
+          // Decoding failed, assume raw text
+          isRawText = true;
+        }
+      } else {
+        // Unknown extension, check content
+        isRawText = firstLine.includes(',') || firstLine.startsWith('"') || firstLine.includes('\t');
+      }
+      
+      console.log(`Attachment content type: ${isRawText ? 'raw text' : 'base64'}, ext: ${originalExt}`);
       
 
       // Determine manifest type from detection or filename
