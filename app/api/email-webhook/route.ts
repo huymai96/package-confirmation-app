@@ -316,46 +316,42 @@ export async function POST(request: NextRequest) {
       
       // Get file extension first (needed for detection)
       const originalExt = attachment.filename.toLowerCase().split('.').pop() || 'csv';
-      
-      // Check if content is base64 or raw text
-      // Better detection: base64 for Excel files should decode to bytes starting with 'PK' (ZIP signature)
-      // CSV/text files should be obvious from content
-      let isRawText = false;
-      
-      // If it looks like CSV (starts with typical CSV patterns)
+
+      // Check content format: base64, raw binary in JSON, or plain text
+      // Make.com sends binary files as raw bytes inside JSON strings (with unicode escapes)
+      // These appear as strings starting with "PK" (ZIP signature) followed by unicode chars
+      let contentFormat: 'base64' | 'binary-json' | 'text' = 'text';
+
       const trimmedContent = attachment.content.trim();
       const firstLine = trimmedContent.split('\n')[0] || '';
-      
-      if (originalExt === 'csv' || originalExt === 'txt') {
-        // For CSV files, likely raw text
-        isRawText = true;
+
+      // Check if content starts with PK (ZIP/XLSX signature) - raw binary in JSON
+      if (trimmedContent.startsWith('PK')) {
+        contentFormat = 'binary-json';
+        console.log('Detected raw binary XLSX in JSON (starts with PK)');
+      } else if (originalExt === 'csv' || originalExt === 'txt') {
+        contentFormat = 'text';
+        console.log('Detected CSV/text file');
       } else if (originalExt === 'xlsx' || originalExt === 'xls') {
-        // For Excel files, should be base64
-        // Try to decode and check for ZIP signature (PK)
+        // Try base64 decode
         try {
-          // Remove any whitespace/newlines from base64 (MIME format)
           const cleanBase64 = attachment.content.replace(/[\r\n\s]/g, '');
           const testDecode = Buffer.from(cleanBase64.slice(0, 100), 'base64');
-          // ZIP files (and XLSX) start with 'PK' (0x50 0x4B)
           if (testDecode[0] === 0x50 && testDecode[1] === 0x4B) {
-            isRawText = false;
-            // Update content to cleaned version for later decoding
+            contentFormat = 'base64';
             attachment.content = cleanBase64;
-            console.log('Detected valid base64 Excel file (ZIP signature found)');
+            console.log('Detected base64 encoded Excel file');
           } else {
-            // Not a valid ZIP, might be corrupted or raw text
-            isRawText = firstLine.includes(',') || firstLine.startsWith('"');
+            contentFormat = 'text';
           }
         } catch {
-          // Decoding failed, assume raw text
-          isRawText = true;
+          contentFormat = 'text';
         }
       } else {
-        // Unknown extension, check content
-        isRawText = firstLine.includes(',') || firstLine.startsWith('"') || firstLine.includes('\t');
+        contentFormat = firstLine.includes(',') || firstLine.startsWith('"') ? 'text' : 'base64';
       }
-      
-      console.log(`Attachment content type: ${isRawText ? 'raw text' : 'base64'}, ext: ${originalExt}`);
+
+      console.log(`Attachment content format: ${contentFormat}, ext: ${originalExt}`);
       
 
       // Determine manifest type from detection or filename
@@ -412,10 +408,16 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        // Handle both raw text and base64 encoded content
+        // Handle different content formats: text, base64, or binary-json
         let fileData: Buffer;
         try {
-          if (isRawText) {
+          if (contentFormat === 'binary-json') {
+            // Content is raw binary bytes embedded in JSON string
+            // Make.com sends XLSX as raw bytes, which appear as unicode in JSON
+            // Use 'latin1' (binary) encoding to preserve each byte value
+            fileData = Buffer.from(attachment.content, 'latin1');
+            console.log(`Binary-JSON buffer created: ${fileData.length} bytes, starts with: ${fileData[0]?.toString(16)} ${fileData[1]?.toString(16)}`);
+          } else if (contentFormat === 'text') {
             // Content is raw text (like CSV from Make.com)
             fileData = Buffer.from(attachment.content, 'utf-8');
           } else {
