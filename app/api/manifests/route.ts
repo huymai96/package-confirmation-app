@@ -37,6 +37,17 @@ async function getBlobByName(filename: string) {
   }
 }
 
+// Helper to detect manifest type from filename
+function detectManifestType(filename: string): string {
+  const lower = filename.toLowerCase();
+  if (lower.includes('sanmar')) return 'sanmar';
+  if (lower.includes('s&s') || lower.includes('ss_') || lower.startsWith('ss')) return 'ss';
+  if (lower.includes('customink')) return 'customink';
+  if (lower.includes('inbound') || lower.includes('quantumview')) return 'inbound';
+  if (lower.includes('alphabroder')) return 'alphabroder';
+  return 'other';
+}
+
 // GET - List all manifests or download a specific one
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -46,31 +57,25 @@ export async function GET(request: NextRequest) {
   // List all manifests
   if (action === 'list' || !action) {
     try {
-      const { blobs } = await list();
+      const { blobs } = await list({ prefix: 'manifests/' });
       
-      const manifests: ManifestInfo[] = [];
-      
-      for (const [manifestType, filename] of Object.entries(MANIFEST_TYPES)) {
-        const blob = blobs.find(b => b.pathname === `manifests/${filename}`);
-        if (blob) {
-          manifests.push({
-            type: manifestType,
+      const manifests: ManifestInfo[] = blobs
+        .filter(b => b.pathname.startsWith('manifests/'))
+        .map(blob => {
+          const filename = blob.pathname.replace('manifests/', '');
+          return {
+            type: detectManifestType(filename),
             filename: filename,
             url: blob.url,
             size: blob.size,
             uploadedAt: blob.uploadedAt.toISOString()
-          });
-        }
-      }
-
-      // Remove duplicates (ss and ssactivewear point to same file)
-      const uniqueManifests = manifests.filter((m, i, arr) => 
-        arr.findIndex(x => x.filename === m.filename) === i
-      );
+          };
+        })
+        .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
 
       return NextResponse.json({
-        manifests: uniqueManifests,
-        count: uniqueManifests.length,
+        manifests,
+        count: manifests.length,
         types: Object.keys(MANIFEST_TYPES)
       });
     } catch (error) {
