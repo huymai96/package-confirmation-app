@@ -10,7 +10,7 @@ import pandas as pd
 from io import BytesIO
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
 API_BASE = "https://package-confirmation-app.vercel.app"
 API_KEY = "promos-label-2024"
@@ -37,12 +37,6 @@ def build_index():
     print(f"Found {len(manifests)} manifests in cloud")
     
     index = {}
-    sanmar_dfs = []  # For Sanmar combined manifest (original structure)
-    ss_dfs = []      # For S&S combined manifest (original structure)
-    today = get_today()
-    
-    # Calculate 10-day cutoff
-    ten_days_ago = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
     
     # Process combined files first (master files)
     ss_combined = [m for m in manifests if 'ss_combined' in m.get('filename', '')]
@@ -174,15 +168,6 @@ def build_index():
                         }
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
-            
-            # Add original dataframe for combined (filter by date if possible)
-            if ship_date_col and ship_date_col in df.columns:
-                df['_ship_date_str'] = df[ship_date_col].astype(str).str[:10]
-                df_filtered = df[df['_ship_date_str'] >= ten_days_ago].drop(columns=['_ship_date_str'])
-                if len(df_filtered) > 0:
-                    ss_dfs.append(df_filtered)
-            else:
-                ss_dfs.append(df)
                 
         except Exception as e:
             print(f"  {m['filename']}: Error - {e}")
@@ -237,15 +222,6 @@ def build_index():
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
             
-            # Add original dataframe for combined (filter by date if possible)
-            if ship_date_col and ship_date_col in df.columns:
-                df['_ship_date_str'] = df[ship_date_col].astype(str).str[:10].str.replace('/', '-')
-                df_filtered = df[df['_ship_date_str'] >= ten_days_ago].drop(columns=['_ship_date_str'])
-                if len(df_filtered) > 0:
-                    sanmar_dfs.append(df_filtered)
-            else:
-                sanmar_dfs.append(df)
-                
         except Exception as e:
             print(f"  {m['filename']}: Error - {e}")
     
@@ -355,80 +331,8 @@ def build_index():
     else:
         print(f"ERROR: {response.status_code} - {response.text}")
     
-    # Upload combined manifests (preserving original column structure)
-    
-    # Clean up old combined files first
-    print("\nCleaning up old combined files...")
-    for m in manifests:
-        if 'combined' in m.get('filename', ''):
-            try:
-                del_response = requests.delete(
-                    f"{API_BASE}/api/manifests",
-                    headers={'x-api-key': UPLOAD_KEY},
-                    params={'url': m['url']}
-                )
-                if del_response.status_code == 200:
-                    print(f"  Deleted old: {m['filename']}")
-            except Exception as e:
-                print(f"  Failed to delete {m['filename']}: {e}")
-    
-    # Sanmar combined XLSX (headers in row 1, same as original sanmar.xlsx)
-    if sanmar_dfs:
-        print(f"\nCreating Sanmar combined manifest...")
-        sanmar_combined = pd.concat(sanmar_dfs, ignore_index=True)
-        # Remove duplicates based on tracking number
-        tracking_cols = [c for c in sanmar_combined.columns if 'tracking' in str(c).lower()]
-        if tracking_cols:
-            sanmar_combined = sanmar_combined.drop_duplicates(subset=tracking_cols, keep='first')
-        
-        print(f"  Total rows: {len(sanmar_combined)}")
-        print(f"  Columns: {list(sanmar_combined.columns)[:5]}...")
-        
-        sanmar_buffer = BytesIO()
-        # Write Excel with headers in row 1 (standard format)
-        sanmar_combined.to_excel(sanmar_buffer, index=False, engine='openpyxl')
-        sanmar_buffer.seek(0)
-        
-        sanmar_response = requests.post(
-            f"{API_BASE}/api/manifests",
-            headers={'x-api-key': UPLOAD_KEY},
-            files={'file': ('sanmar_combined.xlsx', sanmar_buffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
-            data={'type': 'sanmar_combined'}
-        )
-        
-        if sanmar_response.status_code == 200:
-            print(f"  SUCCESS! sanmar_combined.xlsx uploaded")
-        else:
-            print(f"  ERROR: {sanmar_response.status_code} - {sanmar_response.text}")
-    
-    # S&S combined Excel (headers in row 1, same as original s&s.xlsx)
-    if ss_dfs:
-        print(f"\nCreating S&S combined manifest...")
-        ss_combined = pd.concat(ss_dfs, ignore_index=True)
-        # Remove duplicates based on tracking number
-        tracking_cols = [c for c in ss_combined.columns if 'tracking' in str(c).lower()]
-        if tracking_cols:
-            ss_combined = ss_combined.drop_duplicates(subset=tracking_cols, keep='first')
-        
-        print(f"  Total rows: {len(ss_combined)}")
-        print(f"  Columns: {list(ss_combined.columns)[:5]}...")
-        
-        ss_buffer = BytesIO()
-        # Write Excel with headers in row 1 (standard format, like original s&s.xlsx)
-        ss_combined.to_excel(ss_buffer, index=False, engine='openpyxl')
-        ss_buffer.seek(0)
-        
-        ss_response = requests.post(
-            f"{API_BASE}/api/manifests",
-            headers={'x-api-key': UPLOAD_KEY},
-            files={'file': ('ss_combined.xlsx', ss_buffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
-            data={'type': 'ss_combined'}
-        )
-        
-        if ss_response.status_code == 200:
-            print(f"  SUCCESS! ss_combined.xlsx uploaded")
-        else:
-            print(f"  ERROR: {ss_response.status_code} - {ss_response.text}")
+    # Note: Combined manifest files (sanmar_combined.xlsx, ss_combined.xlsx) are 
+    # master files uploaded separately via upload_master.py - don't modify them here
     
     return index
 
