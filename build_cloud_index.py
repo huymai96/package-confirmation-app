@@ -284,7 +284,7 @@ def build_index():
             except Exception as e:
                 print(f"  Failed to delete {m['filename']}: {e}")
     
-    # Sanmar combined CSV (original format)
+    # Sanmar combined XLSX (headers in row 1, same as original sanmar.xlsx)
     if sanmar_dfs:
         print(f"\nCreating Sanmar combined manifest...")
         sanmar_combined = pd.concat(sanmar_dfs, ignore_index=True)
@@ -297,22 +297,23 @@ def build_index():
         print(f"  Columns: {list(sanmar_combined.columns)[:5]}...")
         
         sanmar_buffer = BytesIO()
-        sanmar_combined.to_csv(sanmar_buffer, index=False)
+        # Write Excel with headers in row 1 (standard format)
+        sanmar_combined.to_excel(sanmar_buffer, index=False, engine='openpyxl')
         sanmar_buffer.seek(0)
         
         sanmar_response = requests.post(
             f"{API_BASE}/api/manifests",
             headers={'x-api-key': UPLOAD_KEY},
-            files={'file': ('sanmar_combined.csv', sanmar_buffer, 'text/csv')},
+            files={'file': ('sanmar_combined.xlsx', sanmar_buffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
             data={'type': 'sanmar_combined'}
         )
         
         if sanmar_response.status_code == 200:
-            print(f"  SUCCESS! sanmar_combined.csv uploaded")
+            print(f"  SUCCESS! sanmar_combined.xlsx uploaded")
         else:
             print(f"  ERROR: {sanmar_response.status_code} - {sanmar_response.text}")
     
-    # S&S combined Excel (with original column names, header row 2 like original)
+    # S&S combined Excel (headers in row 1, same as original s&s.xlsx)
     if ss_dfs:
         print(f"\nCreating S&S combined manifest...")
         ss_combined = pd.concat(ss_dfs, ignore_index=True)
@@ -325,10 +326,8 @@ def build_index():
         print(f"  Columns: {list(ss_combined.columns)[:5]}...")
         
         ss_buffer = BytesIO()
-        # Write with blank first row to match original S&S format (header=1)
-        # Original format: Row 1 = company info, Row 2 = headers, Row 3+ = data
-        with pd.ExcelWriter(ss_buffer, engine='openpyxl') as writer:
-            ss_combined.to_excel(writer, index=False, header=True, sheet_name='Sheet1', startrow=1)
+        # Write Excel with headers in row 1 (standard format, like original s&s.xlsx)
+        ss_combined.to_excel(ss_buffer, index=False, engine='openpyxl')
         ss_buffer.seek(0)
         
         ss_response = requests.post(
