@@ -255,6 +255,15 @@ export default function Home() {
   const [manifests, setManifests] = useState<ManifestFile[]>([]);
   const [manifestsLoading, setManifestsLoading] = useState(false);
   const [uploadingManifest, setUploadingManifest] = useState(false);
+  
+  // Index stats state
+  const [indexStats, setIndexStats] = useState<{
+    hasIndex: boolean;
+    trackingCount: number;
+    bySource: Record<string, number>;
+    lastUpdated: string | null;
+    combinedFiles: Array<{ name: string; url: string; size: number; uploadedAt: string }>;
+  } | null>(null);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -341,9 +350,14 @@ export default function Home() {
   const fetchManifests = async () => {
     setManifestsLoading(true);
     try {
-      const res = await fetch('/api/manifests?action=list');
-      const data = await res.json();
-      setManifests(data.manifests || []);
+      const [manifestsRes, statsRes] = await Promise.all([
+        fetch('/api/manifests?action=list'),
+        fetch('/api/index-stats')
+      ]);
+      const manifestsData = await manifestsRes.json();
+      const statsData = await statsRes.json();
+      setManifests(manifestsData.manifests || []);
+      setIndexStats(statsData);
     } catch (error) {
       console.error('Error fetching manifests:', error);
     } finally {
@@ -1612,6 +1626,71 @@ export default function Home() {
                     Refresh
                   </button>
                 </div>
+
+                {/* Tracking Index Stats */}
+                {indexStats && (
+                  <div className="bg-gradient-to-r from-indigo-500/20 to-purple-500/20 rounded-xl p-4 border border-indigo-400/30">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-indigo-300 text-sm font-medium flex items-center gap-2">
+                        <Search className="w-4 h-4" /> Tracking Index
+                      </h4>
+                      {indexStats.lastUpdated && (
+                        <span className="text-white/40 text-xs">
+                          Updated: {new Date(indexStats.lastUpdated).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                      <div className="bg-white/10 rounded-lg p-2 text-center">
+                        <p className="text-2xl font-bold text-white">{indexStats.trackingCount.toLocaleString()}</p>
+                        <p className="text-white/50 text-xs">Total Indexed</p>
+                      </div>
+                      <div className="bg-blue-500/20 rounded-lg p-2 text-center">
+                        <p className="text-xl font-bold text-blue-300">{(indexStats.bySource?.sanmar || 0).toLocaleString()}</p>
+                        <p className="text-blue-400/60 text-xs">Sanmar</p>
+                      </div>
+                      <div className="bg-green-500/20 rounded-lg p-2 text-center">
+                        <p className="text-xl font-bold text-green-300">{(indexStats.bySource?.ss || 0).toLocaleString()}</p>
+                        <p className="text-green-400/60 text-xs">S&S</p>
+                      </div>
+                      <div className="bg-pink-500/20 rounded-lg p-2 text-center">
+                        <p className="text-xl font-bold text-pink-300">{(indexStats.bySource?.customink || 0).toLocaleString()}</p>
+                        <p className="text-pink-400/60 text-xs">CustomInk</p>
+                      </div>
+                    </div>
+                    <p className="text-white/40 text-xs">🔄 Index auto-rebuilds every 15 minutes from scheduled task</p>
+                  </div>
+                )}
+
+                {/* Combined Files - Quick Download */}
+                {indexStats?.combinedFiles && indexStats.combinedFiles.length > 0 && (
+                  <div className="bg-gradient-to-r from-amber-500/20 to-orange-500/20 rounded-xl p-4 border border-amber-400/30">
+                    <h4 className="text-amber-300 text-sm font-medium mb-3 flex items-center gap-2">
+                      <Download className="w-4 h-4" /> Combined Manifests (For Offline Label Print GUI)
+                    </h4>
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      {indexStats.combinedFiles.map((file, i) => (
+                        <a
+                          key={i}
+                          href={file.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-3 p-3 bg-white/10 hover:bg-white/20 rounded-lg transition-colors group"
+                        >
+                          <FileSpreadsheet className="w-8 h-8 text-amber-400 group-hover:scale-110 transition-transform" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-medium text-sm truncate">{file.name}</p>
+                            <p className="text-white/50 text-xs">
+                              {(file.size / 1024).toFixed(0)} KB • {new Date(file.uploadedAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <Download className="w-5 h-5 text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </a>
+                      ))}
+                    </div>
+                    <p className="text-white/40 text-xs mt-2">📥 Download these files for use with the offline label print GUI</p>
+                  </div>
+                )}
 
                 {/* Auto-Capture Status */}
                 <div className="bg-gradient-to-r from-emerald-500/10 to-green-500/10 rounded-xl p-4 border border-emerald-400/20">
