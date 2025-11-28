@@ -106,7 +106,7 @@ export async function GET(request: NextRequest) {
             }
           } else if (carrier === 'FedEx') {
             const fedexData = await trackFedExPackage(scan.tracking);
-            if (fedexData && fedexData.found && fedexData.origin) {
+            if (fedexData && fedexData.origin) {
               const originZipCode = fedexData.origin.postalCode || '';
               if (supplier.zipCodes.includes(originZipCode)) {
                 supplierShipments.push({
