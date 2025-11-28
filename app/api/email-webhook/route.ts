@@ -88,23 +88,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    let emailData: {
-      from?: string;
-      subject?: string;
-      attachments?: Array<{
-        filename: string;
-        content: string; // base64
-        contentType?: string;
-      }>;
-      // Alternative flat structure from some services
-      attachment_filename?: string;
-      attachment_content?: string;
-      attachment_base64?: string;
-    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let rawData: any;
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await request.formData();
-      emailData = {
+      rawData = {
         from: formData.get('from') as string || '',
         subject: formData.get('subject') as string || '',
         attachments: []
@@ -115,37 +104,76 @@ export async function POST(request: NextRequest) {
       for (const [key, value] of entries) {
         if (value instanceof File) {
           const arrayBuffer = await value.arrayBuffer();
-          emailData.attachments?.push({
+          rawData.attachments.push({
             filename: value.name,
+            fileName: value.name,
             content: Buffer.from(arrayBuffer).toString('base64'),
+            data: Buffer.from(arrayBuffer).toString('base64'),
             contentType: value.type
           });
         }
       }
     } else {
-      emailData = await request.json();
+      rawData = await request.json();
     }
 
-    const from = emailData.from || '';
-    const subject = emailData.subject || '';
+    console.log('Email webhook raw data keys:', Object.keys(rawData));
+    console.log('Email webhook raw data:', JSON.stringify(rawData).substring(0, 500));
+
+    // Extract from address - handle Make.com nested structure
+    let from = '';
+    if (typeof rawData.from === 'string') {
+      from = rawData.from;
+    } else if (rawData.from?.address) {
+      from = rawData.from.address;
+    } else if (rawData.from?.text) {
+      from = rawData.from.text;
+    }
+
+    const subject = rawData.subject || '';
     
     console.log(`Email webhook received - From: ${from}, Subject: ${subject}`);
 
-    // Normalize attachments
-    let attachments = emailData.attachments || [];
-    
-    // Handle flat structure
-    if (attachments.length === 0 && (emailData.attachment_content || emailData.attachment_base64)) {
-      attachments = [{
-        filename: emailData.attachment_filename || 'attachment.xlsx',
-        content: emailData.attachment_content || emailData.attachment_base64 || ''
-      }];
+    // Normalize attachments - handle various formats from Make.com
+    interface NormalizedAttachment {
+      filename: string;
+      content: string;
     }
+    
+    let attachments: NormalizedAttachment[] = [];
+    
+    // Handle Make.com array format
+    if (Array.isArray(rawData.attachments)) {
+      attachments = rawData.attachments.map((att: { filename?: string; fileName?: string; name?: string; content?: string; data?: string }) => ({
+        filename: att.filename || att.fileName || att.name || 'attachment.xlsx',
+        content: att.content || att.data || ''
+      }));
+    }
+    
+    // Handle flat structure from some services
+    if (attachments.length === 0) {
+      const flatFilename = rawData.attachment_filename || rawData.attachmentFilename || rawData.fileName || rawData.filename;
+      const flatContent = rawData.attachment_content || rawData.attachment_base64 || rawData.attachmentContent || rawData.data || rawData.content;
+      
+      if (flatFilename && flatContent) {
+        attachments = [{
+          filename: flatFilename,
+          content: flatContent
+        }];
+      }
+    }
+
+    console.log(`Email webhook: Found ${attachments.length} attachments`);
 
     if (attachments.length === 0) {
       return NextResponse.json({ 
         success: false, 
-        message: 'No attachments found in email' 
+        message: 'No attachments found in email',
+        debug: {
+          rawDataKeys: Object.keys(rawData),
+          hasAttachmentsArray: Array.isArray(rawData.attachments),
+          attachmentsLength: rawData.attachments?.length
+        }
       });
     }
 
@@ -161,6 +189,8 @@ export async function POST(request: NextRequest) {
     }> = [];
 
     for (const attachment of attachments) {
+      console.log(`Processing attachment: ${attachment.filename}, content length: ${attachment.content?.length || 0}`);
+      
       // Skip non-spreadsheet files
       const ext = attachment.filename.toLowerCase().split('.').pop();
       if (!['xlsx', 'xls', 'csv'].includes(ext || '')) {
@@ -169,6 +199,17 @@ export async function POST(request: NextRequest) {
           type: 'skipped',
           uploaded: false,
           error: 'Not a spreadsheet file'
+        });
+        continue;
+      }
+      
+      // Skip if no content
+      if (!attachment.content) {
+        results.push({
+          filename: attachment.filename,
+          type: 'skipped',
+          uploaded: false,
+          error: 'No content data'
         });
         continue;
       }
