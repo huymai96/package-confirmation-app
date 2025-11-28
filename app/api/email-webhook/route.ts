@@ -114,7 +114,57 @@ export async function POST(request: NextRequest) {
         }
       }
     } else {
-      rawData = await request.json();
+      // Try to parse as JSON, but handle malformed JSON from Make.com
+      const bodyText = await request.text();
+      console.log('Raw body length:', bodyText.length);
+      console.log('Raw body preview:', bodyText.substring(0, 500));
+      
+      try {
+        rawData = JSON.parse(bodyText);
+      } catch (jsonError) {
+        console.log('JSON parse failed, trying to extract data manually');
+        
+        // Try to extract data from malformed JSON (Make.com issue)
+        // Look for patterns in the malformed JSON
+        const fromMatch = bodyText.match(/"from":\s*"([^"]+)"/);
+        const subjectMatch = bodyText.match(/"subject":\s*"([^"]+)"/);
+        const filenameMatch = bodyText.match(/"filename":\s*"([^"]+)"/);
+        
+        // Find content between "content": " and the end pattern
+        const contentStartIndex = bodyText.indexOf('"content":');
+        let fileContent = '';
+        let filename = filenameMatch ? filenameMatch[1] : 'manifest.csv';
+        
+        if (contentStartIndex > -1) {
+          // Find the actual content start (after "content": ")
+          const actualContentStart = bodyText.indexOf('"', contentStartIndex + 10) + 1;
+          // The content goes until near the end of the attachments array
+          // Look for the closing pattern
+          let contentEnd = bodyText.lastIndexOf('"\n    }');
+          if (contentEnd === -1) contentEnd = bodyText.lastIndexOf('"}');
+          if (contentEnd === -1) contentEnd = bodyText.length - 20;
+          
+          fileContent = bodyText.substring(actualContentStart, contentEnd);
+          // Unescape the content
+          fileContent = fileContent.replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+        }
+        
+        rawData = {
+          from: fromMatch ? fromMatch[1] : '',
+          subject: subjectMatch ? subjectMatch[1] : '',
+          attachments: fileContent ? [{
+            filename: filename,
+            content: fileContent
+          }] : []
+        };
+        
+        console.log('Extracted from malformed JSON:', {
+          from: rawData.from,
+          subject: rawData.subject,
+          attachmentCount: rawData.attachments.length,
+          contentLength: fileContent.length
+        });
+      }
     }
 
     console.log('Email webhook raw data keys:', Object.keys(rawData));
