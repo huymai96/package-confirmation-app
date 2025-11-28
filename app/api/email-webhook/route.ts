@@ -111,7 +111,8 @@ export async function POST(request: NextRequest) {
       };
       
       // Handle file uploads
-      for (const [key, value] of formData.entries()) {
+      const entries = Array.from(formData.entries());
+      for (const [key, value] of entries) {
         if (value instanceof File) {
           const arrayBuffer = await value.arrayBuffer();
           emailData.attachments?.push({
