@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { put } from '@vercel/blob';
+import { put, list, del } from '@vercel/blob';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +25,15 @@ export async function POST(request: NextRequest) {
     const trackingCount = Object.keys(index).length;
     console.log(`Uploading index with ${trackingCount} trackings...`);
     
-    // Save index to blob storage
+    // Delete ALL old index files first
+    const { blobs } = await list();
+    const oldIndexes = blobs.filter(b => b.pathname === INDEX_BLOB_NAME || b.pathname.includes('tracking-index'));
+    for (const oldBlob of oldIndexes) {
+      console.log(`Deleting old index: ${oldBlob.pathname}`);
+      await del(oldBlob.url);
+    }
+    
+    // Save new index to blob storage
     const indexJson = JSON.stringify(index);
     const blob = await put(INDEX_BLOB_NAME, indexJson, {
       access: 'public',
