@@ -13,7 +13,9 @@ export async function GET(request: NextRequest) {
     
     // Find combined manifest files (stored as sanmar_combined.xlsx, ss_combined.xlsx)
     const combinedFiles = blobs.filter(b => 
-      b.pathname.includes('combined')
+      b.pathname.includes('combined') && 
+      b.pathname.startsWith('manifests/') &&
+      b.pathname.endsWith('.xlsx')
     );
     
     // Get index data if exists
