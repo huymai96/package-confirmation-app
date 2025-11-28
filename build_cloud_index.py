@@ -105,7 +105,14 @@ def build_index():
     for m in sanmar_files:
         try:
             file_r = requests.get(m['url'])
-            df = pd.read_csv(BytesIO(file_r.content))
+            # Skip if content looks corrupted (starts with base64 or non-CSV data)
+            content = file_r.content
+            if content[:4] not in [b'"Dec', b'Deco', b'\xef\xbb\xbf"', b'\xef\xbb\xbfD']:  # Valid CSV starts
+                if not content[:50].decode('utf-8', errors='ignore').strip().startswith('"') and \
+                   not content[:50].decode('utf-8', errors='ignore').strip().startswith('Deco'):
+                    print(f"  {m['filename']}: Skipping - appears corrupted")
+                    continue
+            df = pd.read_csv(BytesIO(content))
             
             # Find tracking column for index
             tracking_col = None
@@ -262,6 +269,21 @@ def build_index():
     
     # Upload combined manifests (preserving original column structure)
     
+    # Clean up old combined files first
+    print("\nCleaning up old combined files...")
+    for m in manifests:
+        if 'combined' in m.get('filename', ''):
+            try:
+                del_response = requests.delete(
+                    f"{API_BASE}/api/manifests",
+                    headers={'x-api-key': UPLOAD_KEY},
+                    params={'url': m['url']}
+                )
+                if del_response.status_code == 200:
+                    print(f"  Deleted old: {m['filename']}")
+            except Exception as e:
+                print(f"  Failed to delete {m['filename']}: {e}")
+    
     # Sanmar combined CSV (original format)
     if sanmar_dfs:
         print(f"\nCreating Sanmar combined manifest...")
@@ -290,7 +312,7 @@ def build_index():
         else:
             print(f"  ERROR: {sanmar_response.status_code} - {sanmar_response.text}")
     
-    # S&S combined Excel (original format with header row)
+    # S&S combined Excel (with original column names, header row 2 like original)
     if ss_dfs:
         print(f"\nCreating S&S combined manifest...")
         ss_combined = pd.concat(ss_dfs, ignore_index=True)
@@ -303,14 +325,10 @@ def build_index():
         print(f"  Columns: {list(ss_combined.columns)[:5]}...")
         
         ss_buffer = BytesIO()
-        # Write with blank first row to match original format (header=1)
+        # Write with blank first row to match original S&S format (header=1)
+        # Original format: Row 1 = company info, Row 2 = headers, Row 3+ = data
         with pd.ExcelWriter(ss_buffer, engine='openpyxl') as writer:
-            # Write empty row first
-            pd.DataFrame([[''] * len(ss_combined.columns)], columns=ss_combined.columns).to_excel(
-                writer, index=False, header=True, sheet_name='Sheet1', startrow=0
-            )
-            # Write data starting at row 2 (after header is in row 1, data in row 2+)
-            ss_combined.to_excel(writer, index=False, header=False, sheet_name='Sheet1', startrow=2)
+            ss_combined.to_excel(writer, index=False, header=True, sheet_name='Sheet1', startrow=1)
         ss_buffer.seek(0)
         
         ss_response = requests.post(
