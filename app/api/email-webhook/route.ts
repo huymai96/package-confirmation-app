@@ -224,50 +224,76 @@ export async function POST(request: NextRequest) {
 
       // Determine manifest type from detection or filename
       let manifestType = detected?.type;
-      let targetFilename = detected?.filename;
+      
+      // Preserve original file extension
+      const originalExt = attachment.filename.toLowerCase().split('.').pop() || 'csv';
       
       if (!manifestType) {
         // Try to detect from attachment filename
         const lowerFilename = attachment.filename.toLowerCase();
-        if (lowerFilename.includes('sanmar')) {
+        if (lowerFilename.includes('sanmar') || lowerFilename.includes('freight')) {
           manifestType = 'sanmar';
-          targetFilename = 'sanmar.xlsx';
         } else if (lowerFilename.includes('s&s') || lowerFilename.includes('ss') || lowerFilename.includes('activewear')) {
           manifestType = 'ss';
-          targetFilename = 's&s.xlsx';
         } else {
-          // Default to the original filename
           manifestType = 'unknown';
-          targetFilename = attachment.filename;
         }
+      }
+      
+      // Set target filename with correct extension
+      let targetFilename: string;
+      if (manifestType === 'sanmar') {
+        targetFilename = `sanmar.${originalExt}`;
+      } else if (manifestType === 'ss') {
+        targetFilename = `s&s.${originalExt}`;
+      } else {
+        targetFilename = attachment.filename;
       }
 
       try {
         // Handle both raw text and base64 encoded content
         let fileData: Buffer;
-        if (isRawText) {
-          // Content is raw text (like CSV from Make.com)
-          fileData = Buffer.from(attachment.content, 'utf-8');
-        } else {
-          // Content is base64 encoded
-          fileData = Buffer.from(attachment.content, 'base64');
+        try {
+          if (isRawText) {
+            // Content is raw text (like CSV from Make.com)
+            fileData = Buffer.from(attachment.content, 'utf-8');
+          } else {
+            // Content is base64 encoded
+            fileData = Buffer.from(attachment.content, 'base64');
+          }
+        } catch (bufferError) {
+          console.error('Buffer creation error:', bufferError);
+          results.push({
+            filename: attachment.filename,
+            type: manifestType,
+            uploaded: false,
+            error: `Buffer error: ${String(bufferError)}`
+          });
+          continue;
         }
         
-        console.log(`File data size: ${fileData.length} bytes`);
+        console.log(`File data size: ${fileData.length} bytes, target: ${targetFilename}`);
         const blobPath = `manifests/${targetFilename}`;
 
-        // Delete existing
-        const existingBlob = await getBlobByName(blobPath);
-        if (existingBlob) {
-          await del(existingBlob.url);
+        // Delete existing (ignore errors)
+        try {
+          const existingBlob = await getBlobByName(blobPath);
+          if (existingBlob) {
+            await del(existingBlob.url);
+            console.log(`Deleted existing blob: ${blobPath}`);
+          }
+        } catch (delError) {
+          console.log(`Could not delete existing blob (may not exist): ${delError}`);
         }
 
         // Determine content type
-        const blobContentType = targetFilename?.endsWith('.xlsx')
+        const blobContentType = targetFilename.endsWith('.xlsx')
           ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-          : targetFilename?.endsWith('.csv')
+          : targetFilename.endsWith('.csv')
           ? 'text/csv'
           : 'application/octet-stream';
+
+        console.log(`Uploading to blob: ${blobPath}, contentType: ${blobContentType}`);
 
         // Upload
         const blob = await put(blobPath, fileData, {
