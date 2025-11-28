@@ -13,7 +13,9 @@ const MANIFEST_TYPES = {
   'ss': 's&s.xlsx',
   'ssactivewear': 's&s.xlsx',
   'inbound': 'inbound.csv',
-  'quantumview': 'inbound.csv'
+  'quantumview': 'inbound.csv',
+  'sanmar_combined': 'sanmar_combined.xlsx',
+  'ss_combined': 'ss_combined.xlsx'
 } as const;
 
 type ManifestType = keyof typeof MANIFEST_TYPES;
@@ -40,6 +42,10 @@ async function getBlobByName(filename: string) {
 // Helper to detect manifest type from filename
 function detectManifestType(filename: string): string {
   const lower = filename.toLowerCase();
+  // Check combined files first (more specific)
+  if (lower === 'sanmar_combined.xlsx') return 'sanmar_combined';
+  if (lower === 'ss_combined.xlsx') return 'ss_combined';
+  // Then check regular files
   if (lower.includes('sanmar')) return 'sanmar';
   if (lower.includes('s&s') || lower.includes('ss_') || lower.startsWith('ss')) return 'ss';
   if (lower.includes('customink')) return 'customink';

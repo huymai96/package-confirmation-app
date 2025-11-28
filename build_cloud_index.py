@@ -37,8 +37,13 @@ def build_index():
     print(f"Found {len(manifests)} manifests in cloud")
     
     index = {}
-    combined_records = []  # For combined manifest with full details
+    sanmar_records = []  # For Sanmar combined manifest
+    ss_records = []      # For S&S combined manifest
     today = get_today()
+    
+    # Calculate 10-day cutoff
+    from datetime import timedelta
+    ten_days_ago = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
     
     # Process S&S manifests
     ss_files = [m for m in manifests if m.get('type') == 'ss']
@@ -86,18 +91,18 @@ def build_index():
                             'customer': customer
                         }
                         
-                        combined_records.append({
-                            'tracking': tracking,
-                            'po': po,
-                            'customer': customer,
-                            'source': 'ss',
-                            'shipDate': ship_date[:10] if ship_date else '',
-                            'addedDate': today,
-                            'style': str(row.get(style_col, '')).strip() if style_col else '',
-                            'color': str(row.get(color_col, '')).strip() if color_col else '',
-                            'size': str(row.get(size_col, '')).strip() if size_col else '',
-                            'qty': int(row.get(qty_col, 0)) if qty_col and pd.notna(row.get(qty_col)) else 0
-                        })
+                        record_date = ship_date[:10] if ship_date else today
+                        if record_date >= ten_days_ago:
+                            ss_records.append({
+                                'tracking': tracking,
+                                'po': po,
+                                'customer': customer,
+                                'shipDate': record_date,
+                                'style': str(row.get(style_col, '')).strip() if style_col else '',
+                                'color': str(row.get(color_col, '')).strip() if color_col else '',
+                                'size': str(row.get(size_col, '')).strip() if size_col else '',
+                                'qty': int(row.get(qty_col, 0)) if qty_col and pd.notna(row.get(qty_col)) else 0
+                            })
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
         except Exception as e:
@@ -149,18 +154,18 @@ def build_index():
                             'customer': customer
                         }
                         
-                        combined_records.append({
-                            'tracking': tracking,
-                            'po': po,
-                            'customer': customer,
-                            'source': 'sanmar',
-                            'shipDate': ship_date[:10] if ship_date else '',
-                            'addedDate': today,
-                            'style': str(row.get(style_col, '')).strip() if style_col else '',
-                            'color': str(row.get(color_col, '')).strip() if color_col else '',
-                            'size': str(row.get(size_col, '')).strip() if size_col else '',
-                            'qty': int(row.get(qty_col, 0)) if qty_col and pd.notna(row.get(qty_col)) else 0
-                        })
+                        record_date = ship_date[:10] if ship_date else today
+                        if record_date >= ten_days_ago:
+                            sanmar_records.append({
+                                'tracking': tracking,
+                                'po': po,
+                                'customer': customer,
+                                'shipDate': record_date,
+                                'style': str(row.get(style_col, '')).strip() if style_col else '',
+                                'color': str(row.get(color_col, '')).strip() if color_col else '',
+                                'size': str(row.get(size_col, '')).strip() if size_col else '',
+                                'qty': int(row.get(qty_col, 0)) if qty_col and pd.notna(row.get(qty_col)) else 0
+                            })
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
         except Exception as e:
@@ -211,18 +216,6 @@ def build_index():
                             'customer': customer
                         }
                         
-                        combined_records.append({
-                            'tracking': tracking,
-                            'po': po,
-                            'customer': customer,
-                            'source': 'customink',
-                            'shipDate': due_date[:10] if due_date else '',
-                            'addedDate': today,
-                            'style': str(row.get(style_col, '')).strip() if style_col else '',
-                            'color': str(row.get(color_col, '')).strip() if color_col else '',
-                            'size': str(row.get(size_col, '')).strip() if size_col else '',
-                            'qty': int(row.get(qty_col, 0)) if qty_col and pd.notna(row.get(qty_col)) else 0
-                        })
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
         except Exception as e:
@@ -269,18 +262,6 @@ def build_index():
                             'customer': shipper
                         }
                         
-                        combined_records.append({
-                            'tracking': tracking,
-                            'po': po,
-                            'customer': shipper,
-                            'source': 'inbound',
-                            'shipDate': ship_date[:10] if ship_date else '',
-                            'addedDate': today,
-                            'style': '',
-                            'color': '',
-                            'size': '',
-                            'qty': 0
-                        })
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
         except Exception as e:
@@ -288,7 +269,6 @@ def build_index():
     
     print(f"\n{'=' * 60}")
     print(f"Total tracking numbers indexed: {len(index)}")
-    print(f"Total combined records: {len(combined_records)}")
     
     # Upload index
     print("\nUploading index to cloud...")
@@ -312,24 +292,49 @@ def build_index():
     else:
         print(f"ERROR: {response.status_code} - {response.text}")
     
-    # Upload combined manifest (with 10-day filter applied by API)
-    print("\nUploading combined manifest...")
+    # Upload separate combined manifests for Sanmar and S&S
+    print(f"\nSanmar records (last 10 days): {len(sanmar_records)}")
+    print(f"S&S records (last 10 days): {len(ss_records)}")
     
-    combined_response = requests.post(
-        f"{API_BASE}/api/combined-manifest",
-        headers={
-            'x-api-key': UPLOAD_KEY,
-            'Content-Type': 'application/json'
-        },
-        json={"records": combined_records}
-    )
+    # Create and upload Sanmar combined Excel
+    if sanmar_records:
+        print("\nUploading Sanmar combined manifest...")
+        sanmar_df = pd.DataFrame(sanmar_records)
+        sanmar_buffer = BytesIO()
+        sanmar_df.to_excel(sanmar_buffer, index=False)
+        sanmar_buffer.seek(0)
+        
+        sanmar_response = requests.post(
+            f"{API_BASE}/api/manifests",
+            headers={'x-api-key': UPLOAD_KEY},
+            files={'file': ('sanmar_combined.xlsx', sanmar_buffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
+            data={'type': 'sanmar_combined'}
+        )
+        
+        if sanmar_response.status_code == 200:
+            print(f"  SUCCESS! sanmar_combined.xlsx ({len(sanmar_records)} records)")
+        else:
+            print(f"  ERROR: {sanmar_response.status_code} - {sanmar_response.text}")
     
-    if combined_response.status_code == 200:
-        result = combined_response.json()
-        print(f"SUCCESS! Combined manifest: {result.get('filteredRecords', 0)} records (last 10 days)")
-        print(f"Download: {API_BASE}/api/combined-manifest?format=xlsx")
-    else:
-        print(f"ERROR: {combined_response.status_code} - {combined_response.text}")
+    # Create and upload S&S combined Excel
+    if ss_records:
+        print("\nUploading S&S combined manifest...")
+        ss_df = pd.DataFrame(ss_records)
+        ss_buffer = BytesIO()
+        ss_df.to_excel(ss_buffer, index=False)
+        ss_buffer.seek(0)
+        
+        ss_response = requests.post(
+            f"{API_BASE}/api/manifests",
+            headers={'x-api-key': UPLOAD_KEY},
+            files={'file': ('ss_combined.xlsx', ss_buffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
+            data={'type': 'ss_combined'}
+        )
+        
+        if ss_response.status_code == 200:
+            print(f"  SUCCESS! ss_combined.xlsx ({len(ss_records)} records)")
+        else:
+            print(f"  ERROR: {ss_response.status_code} - {ss_response.text}")
     
     return index
 
