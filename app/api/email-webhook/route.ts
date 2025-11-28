@@ -314,6 +314,9 @@ export async function POST(request: NextRequest) {
         continue;
       }
       
+      // Get file extension first (needed for detection)
+      const originalExt = attachment.filename.toLowerCase().split('.').pop() || 'csv';
+      
       // Check if content is base64 or raw text
       // Better detection: base64 for Excel files should decode to bytes starting with 'PK' (ZIP signature)
       // CSV/text files should be obvious from content
@@ -359,8 +362,7 @@ export async function POST(request: NextRequest) {
       let manifestType = detected?.type;
       let defaultExt = detected?.defaultExt || 'csv';
       
-      // Preserve original file extension from attachment
-      const originalExt = attachment.filename.toLowerCase().split('.').pop() || 'csv';
+      // originalExt already declared above
       
       if (!manifestType) {
         // Try to detect from attachment filename
