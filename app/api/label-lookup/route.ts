@@ -14,6 +14,7 @@ interface IndexEntry {
   department?: string;
   dueDate?: string;
   status?: string;
+  pipelineFlag?: string;
   shipperName?: string;
   referenceTokens?: string[];
 }
