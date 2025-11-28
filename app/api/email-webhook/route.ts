@@ -73,6 +73,9 @@ function detectManifestType(from: string, subject: string): { type: string; defa
   return null;
 }
 
+// Configuration: How many recent manifests to keep per supplier
+const MAX_MANIFESTS_PER_SUPPLIER = 10;
+
 // Helper to get blob URL by name
 async function getBlobByName(filename: string) {
   try {
@@ -82,6 +85,37 @@ async function getBlobByName(filename: string) {
     console.error('Error listing blobs:', error);
     return null;
   }
+}
+
+// Helper to get all manifests for a supplier type and clean up old ones
+async function cleanupOldManifests(supplierType: string) {
+  try {
+    const { blobs } = await list();
+    
+    // Find all manifests for this supplier (e.g., sanmar_2025-11-28.csv)
+    const supplierManifests = blobs
+      .filter(b => b.pathname.startsWith(`manifests/${supplierType}_`))
+      .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+    
+    console.log(`Found ${supplierManifests.length} manifests for ${supplierType}`);
+    
+    // Delete manifests beyond the limit
+    if (supplierManifests.length >= MAX_MANIFESTS_PER_SUPPLIER) {
+      const toDelete = supplierManifests.slice(MAX_MANIFESTS_PER_SUPPLIER - 1); // Keep room for new one
+      for (const blob of toDelete) {
+        console.log(`Deleting old manifest: ${blob.pathname}`);
+        await del(blob.url);
+      }
+    }
+  } catch (error) {
+    console.error(`Error cleaning up manifests for ${supplierType}:`, error);
+  }
+}
+
+// Get today's date string for filename
+function getDateString(): string {
+  const now = new Date();
+  return now.toISOString().split('T')[0]; // YYYY-MM-DD
 }
 
 // POST - Receive email webhook from Zapier/Make/Power Automate
@@ -306,19 +340,34 @@ export async function POST(request: NextRequest) {
       // Use original extension from file, or default for the supplier
       const finalExt = ['xlsx', 'xls', 'csv'].includes(originalExt) ? originalExt : defaultExt;
       
-      // Set target filename with correct extension
+      // Get date string for filename
+      const dateStr = getDateString();
+      
+      // Set target filename with date and correct extension
+      // Format: supplier_YYYY-MM-DD.ext (e.g., sanmar_2025-11-28.csv)
       let targetFilename: string;
+      let supplierKey: string;
+      
       if (manifestType === 'sanmar') {
-        targetFilename = `sanmar.${finalExt}`;
+        supplierKey = 'sanmar';
+        targetFilename = `sanmar_${dateStr}.${finalExt}`;
       } else if (manifestType === 'ss') {
-        targetFilename = `s&s.${finalExt}`;
+        supplierKey = 's&s';
+        targetFilename = `s&s_${dateStr}.${finalExt}`;
       } else if (manifestType === 'alphabroder') {
-        targetFilename = `alphabroder.${finalExt}`;
+        supplierKey = 'alphabroder';
+        targetFilename = `alphabroder_${dateStr}.${finalExt}`;
       } else {
-        targetFilename = attachment.filename;
+        supplierKey = 'unknown';
+        targetFilename = `${dateStr}_${attachment.filename}`;
       }
       
       console.log(`Manifest type: ${manifestType}, Original ext: ${originalExt}, Final ext: ${finalExt}, Target: ${targetFilename}`);
+      
+      // Clean up old manifests for this supplier (keep only 10 most recent)
+      if (supplierKey !== 'unknown') {
+        await cleanupOldManifests(supplierKey);
+      }
 
       try {
         // Handle both raw text and base64 encoded content
@@ -345,15 +394,15 @@ export async function POST(request: NextRequest) {
         console.log(`File data size: ${fileData.length} bytes, target: ${targetFilename}`);
         const blobPath = `manifests/${targetFilename}`;
 
-        // Delete existing (ignore errors)
+        // Check if same-day manifest already exists and delete it (replace with new version)
         try {
           const existingBlob = await getBlobByName(blobPath);
           if (existingBlob) {
             await del(existingBlob.url);
-            console.log(`Deleted existing blob: ${blobPath}`);
+            console.log(`Replaced existing same-day manifest: ${blobPath}`);
           }
         } catch (delError) {
-          console.log(`Could not delete existing blob (may not exist): ${delError}`);
+          console.log(`No existing same-day manifest to replace`);
         }
 
         // Determine content type
