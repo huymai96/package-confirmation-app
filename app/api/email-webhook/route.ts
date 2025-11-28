@@ -213,6 +213,14 @@ export async function POST(request: NextRequest) {
         });
         continue;
       }
+      
+      // Check if content is base64 or raw text
+      // Base64 typically doesn't have newlines or CSV-like content at start
+      const isRawText = attachment.content.includes('\n') || 
+                        attachment.content.startsWith('"') ||
+                        attachment.content.includes(',');
+      console.log(`Attachment content type: ${isRawText ? 'raw text' : 'base64'}`);
+      
 
       // Determine manifest type from detection or filename
       let manifestType = detected?.type;
@@ -235,7 +243,17 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const fileData = Buffer.from(attachment.content, 'base64');
+        // Handle both raw text and base64 encoded content
+        let fileData: Buffer;
+        if (isRawText) {
+          // Content is raw text (like CSV from Make.com)
+          fileData = Buffer.from(attachment.content, 'utf-8');
+        } else {
+          // Content is base64 encoded
+          fileData = Buffer.from(attachment.content, 'base64');
+        }
+        
+        console.log(`File data size: ${fileData.length} bytes`);
         const blobPath = `manifests/${targetFilename}`;
 
         // Delete existing
