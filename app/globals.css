@@ -18,3 +18,114 @@ body {
     rgb(var(--background-start-rgb));
 }
 
+/* Mobile-specific optimizations */
+@media (max-width: 640px) {
+  /* Better touch targets */
+  button, a, [role="button"] {
+    min-height: 44px;
+  }
+  
+  /* Prevent text selection on UI elements */
+  .no-select {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  
+  /* Smooth scrolling for horizontal tab navigation */
+  .tab-scroll {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  
+  .tab-scroll::-webkit-scrollbar {
+    display: none;
+  }
+  
+  /* Better input styling on mobile */
+  input, textarea {
+    font-size: 16px !important; /* Prevents iOS zoom on focus */
+  }
+  
+  /* Modal fullscreen on mobile */
+  .mobile-modal {
+    max-height: 100vh !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+  }
+  
+  /* Fix stats cards on mobile */
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.75rem !important;
+  }
+  
+  /* Compact header on mobile */
+  .mobile-header h1 {
+    font-size: 1.25rem !important;
+    line-height: 1.3 !important;
+  }
+  
+  .mobile-header p {
+    font-size: 0.7rem !important;
+  }
+  
+  /* Better spacing for mobile cards */
+  .mobile-card {
+    padding: 0.75rem !important;
+  }
+  
+  /* Truncate long text */
+  .truncate-mobile {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* Safe area padding for notched phones */
+@supports (padding: max(0px)) {
+  .safe-area-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  
+  .safe-area-top {
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+  }
+}
+
+/* Active states for touch */
+@media (hover: none) {
+  button:active, a:active, [role="button"]:active {
+    opacity: 0.7;
+    transform: scale(0.98);
+  }
+}
+
+/* Loading animation */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-fast {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+/* Smooth transitions */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  body {
+    background: white !important;
+  }
+}
+

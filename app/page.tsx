@@ -474,21 +474,21 @@ export default function Home() {
       />
 
       {/* Header */}
-      <header className="bg-white/10 backdrop-blur-md border-b border-white/10">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-3 rounded-2xl">
-                <Package className="w-8 h-8 text-white" />
+      <header className="bg-white/10 backdrop-blur-md border-b border-white/10 safe-area-top">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
+              <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 sm:p-3 rounded-xl sm:rounded-2xl flex-shrink-0">
+                <Package className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
               </div>
-              <div>
-                <h1 className="text-2xl font-bold text-white">Promos Ink Supply Chain</h1>
-                <p className="text-indigo-200 text-sm">Enterprise Shipment Visibility Platform</p>
+              <div className="min-w-0">
+                <h1 className="text-lg sm:text-2xl font-bold text-white leading-tight truncate">Promos Ink Supply Chain</h1>
+                <p className="text-indigo-200 text-xs sm:text-sm truncate">Enterprise Shipment Visibility Platform</p>
               </div>
             </div>
             <button 
               onClick={() => { fetchRecent(); fetchStats(); fetchQVStats(); }}
-              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+              className="p-2 sm:p-2.5 rounded-lg bg-white/10 hover:bg-white/20 active:bg-white/30 transition-colors flex-shrink-0"
               title="Refresh data"
               aria-label="Refresh data"
             >
@@ -498,102 +498,102 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
         {/* Stats Dashboard */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
-          <div className="bg-blue-500/20 backdrop-blur-sm rounded-2xl p-4 border border-blue-400/30">
-            <div className="flex items-center gap-3">
-              <ArrowDownToLine className="w-8 h-8 text-blue-400" />
-              <div>
-                <p className="text-blue-200 text-xs">Inbound Scans</p>
-                <p className="text-2xl font-bold text-white">{stats.inboundTotal.toLocaleString()}</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 sm:gap-4 mb-4 sm:mb-6">
+          <div className="bg-blue-500/20 backdrop-blur-sm rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-blue-400/30">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <ArrowDownToLine className="w-6 h-6 sm:w-8 sm:h-8 text-blue-400 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-blue-200 text-[10px] sm:text-xs truncate">Inbound Scans</p>
+                <p className="text-xl sm:text-2xl font-bold text-white">{stats.inboundTotal.toLocaleString()}</p>
               </div>
             </div>
           </div>
-          <div className="bg-green-500/20 backdrop-blur-sm rounded-2xl p-4 border border-green-400/30">
-            <div className="flex items-center gap-3">
-              <ArrowUpFromLine className="w-8 h-8 text-green-400" />
-              <div>
-                <p className="text-green-200 text-xs">Outbound</p>
-                <p className="text-2xl font-bold text-white">{stats.outboundTotal.toLocaleString()}</p>
+          <div className="bg-green-500/20 backdrop-blur-sm rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-green-400/30">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <ArrowUpFromLine className="w-6 h-6 sm:w-8 sm:h-8 text-green-400 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-green-200 text-[10px] sm:text-xs truncate">Outbound</p>
+                <p className="text-xl sm:text-2xl font-bold text-white">{stats.outboundTotal.toLocaleString()}</p>
               </div>
             </div>
           </div>
           
           {batchStats ? (
             <>
-              <div className="bg-emerald-500/20 backdrop-blur-sm rounded-2xl p-4 border border-emerald-400/30">
-                <div className="flex items-center gap-3">
-                  <CheckCircle className="w-8 h-8 text-emerald-400" />
-                  <div>
-                    <p className="text-emerald-200 text-xs">Delivered</p>
-                    <p className="text-2xl font-bold text-white">{batchStats.delivered}</p>
+              <div className="bg-emerald-500/20 backdrop-blur-sm rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-emerald-400/30">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <CheckCircle className="w-6 h-6 sm:w-8 sm:h-8 text-emerald-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-emerald-200 text-[10px] sm:text-xs">Delivered</p>
+                    <p className="text-xl sm:text-2xl font-bold text-white">{batchStats.delivered}</p>
                   </div>
                 </div>
               </div>
-              <div className="bg-cyan-500/20 backdrop-blur-sm rounded-2xl p-4 border border-cyan-400/30">
-                <div className="flex items-center gap-3">
-                  <Truck className="w-8 h-8 text-cyan-400" />
-                  <div>
-                    <p className="text-cyan-200 text-xs">In Transit</p>
-                    <p className="text-2xl font-bold text-white">{batchStats.inTransit}</p>
+              <div className="bg-cyan-500/20 backdrop-blur-sm rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-cyan-400/30">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <Truck className="w-6 h-6 sm:w-8 sm:h-8 text-cyan-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-cyan-200 text-[10px] sm:text-xs">In Transit</p>
+                    <p className="text-xl sm:text-2xl font-bold text-white">{batchStats.inTransit}</p>
                   </div>
                 </div>
               </div>
-              <div className="bg-red-500/20 backdrop-blur-sm rounded-2xl p-4 border border-red-400/30">
-                <div className="flex items-center gap-3">
-                  <AlertTriangle className="w-8 h-8 text-red-400" />
-                  <div>
-                    <p className="text-red-200 text-xs">Exceptions</p>
-                    <p className="text-2xl font-bold text-white">{batchStats.exceptions}</p>
+              <div className="bg-red-500/20 backdrop-blur-sm rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-red-400/30">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <AlertTriangle className="w-6 h-6 sm:w-8 sm:h-8 text-red-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-red-200 text-[10px] sm:text-xs">Exceptions</p>
+                    <p className="text-xl sm:text-2xl font-bold text-white">{batchStats.exceptions}</p>
                   </div>
                 </div>
               </div>
-              <div className="bg-gray-500/20 backdrop-blur-sm rounded-2xl p-4 border border-gray-400/30">
-                <div className="flex items-center gap-3">
-                  <Package className="w-8 h-8 text-gray-400" />
-                  <div>
-                    <p className="text-gray-200 text-xs">Batch Total</p>
-                    <p className="text-2xl font-bold text-white">{batchStats.total}</p>
+              <div className="bg-gray-500/20 backdrop-blur-sm rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-gray-400/30">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <Package className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-gray-200 text-[10px] sm:text-xs">Batch Total</p>
+                    <p className="text-xl sm:text-2xl font-bold text-white">{batchStats.total}</p>
                   </div>
                 </div>
               </div>
             </>
           ) : (
             <>
-              <div className="bg-amber-500/20 backdrop-blur-sm rounded-2xl p-4 border border-amber-400/30">
-                <div className="flex items-center gap-3">
-                  <Truck className="w-8 h-8 text-amber-400" />
-                  <div>
-                    <p className="text-amber-200 text-xs">UPS Quantum View</p>
-                    <p className="text-2xl font-bold text-white">{qvStats.totalShipments}</p>
+              <div className="bg-amber-500/20 backdrop-blur-sm rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-amber-400/30">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <Truck className="w-6 h-6 sm:w-8 sm:h-8 text-amber-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-amber-200 text-[10px] sm:text-xs truncate">UPS Quantum View</p>
+                    <p className="text-xl sm:text-2xl font-bold text-white">{qvStats.totalShipments}</p>
                   </div>
                 </div>
               </div>
-              <div className="bg-purple-500/20 backdrop-blur-sm rounded-2xl p-4 border border-purple-400/30">
-                <div className="flex items-center gap-3">
-                  <Users className="w-8 h-8 text-purple-400" />
-                  <div>
-                    <p className="text-purple-200 text-xs">Suppliers</p>
-                    <p className="text-2xl font-bold text-white">{suppliers.length}</p>
+              <div className="bg-purple-500/20 backdrop-blur-sm rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-purple-400/30">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <Users className="w-6 h-6 sm:w-8 sm:h-8 text-purple-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-purple-200 text-[10px] sm:text-xs">Suppliers</p>
+                    <p className="text-xl sm:text-2xl font-bold text-white">{suppliers.length}</p>
                   </div>
                 </div>
               </div>
-              <div className="bg-pink-500/20 backdrop-blur-sm rounded-2xl p-4 border border-pink-400/30">
-                <div className="flex items-center gap-3">
-                  <Building2 className="w-8 h-8 text-pink-400" />
-                  <div>
-                    <p className="text-pink-200 text-xs">Warehouses</p>
-                    <p className="text-2xl font-bold text-white">FB1 & FB2</p>
+              <div className="bg-pink-500/20 backdrop-blur-sm rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-pink-400/30">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <Building2 className="w-6 h-6 sm:w-8 sm:h-8 text-pink-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-pink-200 text-[10px] sm:text-xs">Warehouses</p>
+                    <p className="text-lg sm:text-2xl font-bold text-white">FB1 & FB2</p>
                   </div>
                 </div>
               </div>
-              <div className="bg-teal-500/20 backdrop-blur-sm rounded-2xl p-4 border border-teal-400/30 cursor-pointer hover:bg-teal-500/30 transition-colors" onClick={() => { setActiveTab('reports'); fetchReports(); }}>
-                <div className="flex items-center gap-3">
-                  <BarChart3 className="w-8 h-8 text-teal-400" />
-                  <div>
-                    <p className="text-teal-200 text-xs">Reports</p>
-                    <p className="text-lg font-bold text-white">View →</p>
+              <div className="bg-teal-500/20 backdrop-blur-sm rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-teal-400/30 cursor-pointer hover:bg-teal-500/30 active:bg-teal-500/40 transition-colors" onClick={() => { setActiveTab('reports'); fetchReports(); }}>
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <BarChart3 className="w-6 h-6 sm:w-8 sm:h-8 text-teal-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-teal-200 text-[10px] sm:text-xs">Reports</p>
+                    <p className="text-base sm:text-lg font-bold text-white">View →</p>
                   </div>
                 </div>
               </div>
@@ -602,11 +602,11 @@ export default function Home() {
         </div>
 
         {/* Main Search Area */}
-        <div className="grid md:grid-cols-2 gap-6 mb-6">
+        <div className="grid md:grid-cols-2 gap-3 sm:gap-6 mb-4 sm:mb-6">
           {/* Tracking Search */}
-          <div className="bg-white rounded-2xl shadow-xl p-5">
-            <label className="block text-gray-700 font-semibold mb-2 flex items-center gap-2">
-              <Search className="w-5 h-5" /> Search Tracking # or PO #
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-xl p-4 sm:p-5">
+            <label className="block text-gray-700 font-semibold mb-2 flex items-center gap-2 text-sm sm:text-base">
+              <Search className="w-4 h-4 sm:w-5 sm:h-5" /> Search Tracking # or PO #
             </label>
             <div className="flex gap-2">
               <input
@@ -614,13 +614,13 @@ export default function Home() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                placeholder="1Z90A10R0306936706 or 84379144"
-                className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-500 transition-colors text-gray-900"
+                placeholder="1Z90A10R0306936706 or PO#"
+                className="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 border-2 border-gray-200 rounded-lg sm:rounded-xl focus:outline-none focus:border-indigo-500 transition-colors text-gray-900 text-sm sm:text-base"
               />
               <button
                 onClick={() => handleSearch()}
                 disabled={loading || !query.trim()}
-                className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-400 text-white font-bold rounded-xl transition-all flex items-center gap-2"
+                className="px-4 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 active:from-blue-800 active:to-purple-800 disabled:from-gray-400 disabled:to-gray-400 text-white font-bold rounded-lg sm:rounded-xl transition-all flex items-center gap-2"
               >
                 {loading ? (
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -632,9 +632,9 @@ export default function Home() {
           </div>
 
           {/* Origin/Supplier Search */}
-          <div className="bg-white rounded-2xl shadow-xl p-5">
-            <label className="block text-gray-700 font-semibold mb-2 flex items-center gap-2">
-              <MapPin className="w-5 h-5" /> Search Inbound by Origin ZIP
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-xl p-4 sm:p-5">
+            <label className="block text-gray-700 font-semibold mb-2 flex items-center gap-2 text-sm sm:text-base">
+              <MapPin className="w-4 h-4 sm:w-5 sm:h-5" /> Search by Origin ZIP
             </label>
             <div className="flex gap-2">
               <input
@@ -643,12 +643,12 @@ export default function Home() {
                 onChange={(e) => setOriginZip(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && searchInboundByOrigin()}
                 placeholder="e.g. 92801 (Image Tech)"
-                className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-amber-500 transition-colors text-gray-900"
+                className="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 border-2 border-gray-200 rounded-lg sm:rounded-xl focus:outline-none focus:border-amber-500 transition-colors text-gray-900 text-sm sm:text-base"
               />
               <button
                 onClick={searchInboundByOrigin}
                 disabled={inboundLoading || !originZip.trim()}
-                className="px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:from-gray-400 disabled:to-gray-400 text-white font-bold rounded-xl transition-all flex items-center gap-2"
+                className="px-4 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:from-amber-700 active:to-orange-700 disabled:from-gray-400 disabled:to-gray-400 text-white font-bold rounded-lg sm:rounded-xl transition-all flex items-center gap-2"
               >
                 {inboundLoading ? (
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -657,7 +657,7 @@ export default function Home() {
                 )}
               </button>
             </div>
-            <p className="text-xs text-gray-500 mt-2">Find shipments coming FROM a supplier location</p>
+            <p className="text-[11px] sm:text-xs text-gray-500 mt-2">Find shipments from supplier locations</p>
           </div>
         </div>
 
@@ -900,77 +900,81 @@ export default function Home() {
         )}
 
         {/* Tab Navigation */}
-        <div className="bg-white/10 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden">
-          <div className="flex border-b border-white/10 overflow-x-auto">
+        <div className="bg-white/10 backdrop-blur-sm rounded-xl sm:rounded-2xl border border-white/10 overflow-hidden">
+          <div className="flex border-b border-white/10 overflow-x-auto tab-scroll">
             <button
               onClick={() => setActiveTab('inbound')}
-              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
+              className={`flex-1 min-w-[70px] px-2 sm:px-3 py-2.5 sm:py-3 font-semibold flex items-center justify-center gap-1 sm:gap-2 transition-colors text-xs sm:text-sm whitespace-nowrap ${
                 activeTab === 'inbound' 
                   ? 'bg-blue-500/20 text-blue-300 border-b-2 border-blue-400' 
-                  : 'text-white/60 hover:bg-white/5'
+                  : 'text-white/60 hover:bg-white/5 active:bg-white/10'
               }`}
             >
-              <ArrowDownToLine className="w-4 h-4" />
-              Inbound
+              <ArrowDownToLine className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden xs:inline">Inbound</span>
+              <span className="xs:hidden">In</span>
             </button>
             <button
               onClick={() => setActiveTab('outbound')}
-              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
+              className={`flex-1 min-w-[70px] px-2 sm:px-3 py-2.5 sm:py-3 font-semibold flex items-center justify-center gap-1 sm:gap-2 transition-colors text-xs sm:text-sm whitespace-nowrap ${
                 activeTab === 'outbound' 
                   ? 'bg-green-500/20 text-green-300 border-b-2 border-green-400' 
-                  : 'text-white/60 hover:bg-white/5'
+                  : 'text-white/60 hover:bg-white/5 active:bg-white/10'
               }`}
             >
-              <ArrowUpFromLine className="w-4 h-4" />
-              Outbound
+              <ArrowUpFromLine className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden xs:inline">Outbound</span>
+              <span className="xs:hidden">Out</span>
             </button>
             <button
               onClick={() => setActiveTab('suppliers')}
-              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
+              className={`flex-1 min-w-[70px] px-2 sm:px-3 py-2.5 sm:py-3 font-semibold flex items-center justify-center gap-1 sm:gap-2 transition-colors text-xs sm:text-sm whitespace-nowrap ${
                 activeTab === 'suppliers' 
                   ? 'bg-purple-500/20 text-purple-300 border-b-2 border-purple-400' 
-                  : 'text-white/60 hover:bg-white/5'
+                  : 'text-white/60 hover:bg-white/5 active:bg-white/10'
               }`}
             >
-              <Users className="w-4 h-4" />
-              Suppliers
+              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">Suppliers</span>
+              <span className="sm:hidden">Sup</span>
             </button>
             <button
               onClick={() => setActiveTab('batch')}
-              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
+              className={`flex-1 min-w-[60px] px-2 sm:px-3 py-2.5 sm:py-3 font-semibold flex items-center justify-center gap-1 sm:gap-2 transition-colors text-xs sm:text-sm whitespace-nowrap ${
                 activeTab === 'batch' 
                   ? 'bg-cyan-500/20 text-cyan-300 border-b-2 border-cyan-400' 
-                  : 'text-white/60 hover:bg-white/5'
+                  : 'text-white/60 hover:bg-white/5 active:bg-white/10'
               }`}
             >
-              <FileSpreadsheet className="w-4 h-4" />
+              <FileSpreadsheet className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               Batch
             </button>
             <button
               onClick={() => { setActiveTab('reports'); fetchReports(); }}
-              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
+              className={`flex-1 min-w-[60px] px-2 sm:px-3 py-2.5 sm:py-3 font-semibold flex items-center justify-center gap-1 sm:gap-2 transition-colors text-xs sm:text-sm whitespace-nowrap ${
                 activeTab === 'reports' 
                   ? 'bg-teal-500/20 text-teal-300 border-b-2 border-teal-400' 
-                  : 'text-white/60 hover:bg-white/5'
+                  : 'text-white/60 hover:bg-white/5 active:bg-white/10'
               }`}
             >
-              <BarChart3 className="w-4 h-4" />
-              Reports
+              <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">Reports</span>
+              <span className="sm:hidden">📊</span>
             </button>
             <button
               onClick={() => setActiveTab('quantum')}
-              className={`flex-1 px-3 py-3 font-semibold flex items-center justify-center gap-2 transition-colors text-sm whitespace-nowrap ${
+              className={`flex-1 min-w-[50px] px-2 sm:px-3 py-2.5 sm:py-3 font-semibold flex items-center justify-center gap-1 sm:gap-2 transition-colors text-xs sm:text-sm whitespace-nowrap ${
                 activeTab === 'quantum' 
                   ? 'bg-amber-500/20 text-amber-300 border-b-2 border-amber-400' 
-                  : 'text-white/60 hover:bg-white/5'
+                  : 'text-white/60 hover:bg-white/5 active:bg-white/10'
               }`}
             >
-              <Truck className="w-4 h-4" />
+              <Truck className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               QV
             </button>
           </div>
 
-          <div className="p-4 max-h-[500px] overflow-y-auto">
+          <div className="p-3 sm:p-4 max-h-[400px] sm:max-h-[500px] overflow-y-auto">
             {/* Inbound Tab */}
             {activeTab === 'inbound' && (
               <div className="space-y-2">
@@ -1515,10 +1519,10 @@ export default function Home() {
         </div>
       </main>
 
-      <footer className="text-center py-4 text-white/40 text-sm border-t border-white/10 mt-8">
-        <p>Promos Ink Supply Chain Platform • FB1 & FB2 Warehouses • Dallas, TX</p>
-        <p className="text-xs mt-1">
-          Suppliers: Image Technology • Grimco • Nazdar SourceOne • Kornit Digital
+      <footer className="text-center py-4 px-3 text-white/40 text-xs sm:text-sm border-t border-white/10 mt-6 sm:mt-8 safe-area-bottom">
+        <p className="leading-relaxed">Promos Ink Supply Chain Platform<span className="hidden sm:inline"> •</span><br className="sm:hidden" /> FB1 & FB2 Warehouses • Dallas, TX</p>
+        <p className="text-[10px] sm:text-xs mt-1 opacity-70">
+          Suppliers: Image Technology • Grimco • Nazdar • Kornit
         </p>
       </footer>
     </div>
