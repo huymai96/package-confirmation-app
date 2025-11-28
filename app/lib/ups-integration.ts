@@ -48,6 +48,7 @@ interface UPSPackage {
     city: string;
     state: string;
     country: string;
+    postalCode?: string;
   };
   destination: {
     city: string;
@@ -202,7 +203,8 @@ export async function trackPackage(trackingNumber: string): Promise<UPSPackage |
       origin: {
         city: shipment.shipper?.address?.city || '',
         state: shipment.shipper?.address?.stateProvince || '',
-        country: shipment.shipper?.address?.country || ''
+        country: shipment.shipper?.address?.country || '',
+        postalCode: shipment.shipper?.address?.postalCode || ''
       },
       destination: {
         city: shipment.shipTo?.address?.city || '',
