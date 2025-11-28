@@ -266,14 +266,29 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const type = searchParams.get('type') as ManifestType | null;
+  const blobUrl = searchParams.get('url');
   const apiKey = request.headers.get('x-api-key');
 
   if (apiKey !== UPLOAD_API_KEY) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Delete by URL (for cleanup of dated files)
+  if (blobUrl) {
+    try {
+      await del(blobUrl);
+      return NextResponse.json({
+        success: true,
+        message: 'Manifest deleted by URL'
+      });
+    } catch (error) {
+      return NextResponse.json({ error: 'Failed to delete', details: String(error) }, { status: 500 });
+    }
+  }
+
+  // Delete by type (legacy support)
   if (!type || !(type in MANIFEST_TYPES)) {
-    return NextResponse.json({ error: 'Invalid manifest type' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid manifest type or missing url parameter' }, { status: 400 });
   }
 
   const filename = MANIFEST_TYPES[type];
