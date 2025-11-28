@@ -2,21 +2,27 @@
 """
 Build tracking index from CLOUD manifests and upload to Vercel
 Run this after new manifests are uploaded via email webhook
+Also builds combined manifest for offline/backup use
 """
 
 import requests
 import pandas as pd
 from io import BytesIO
 import json
+import re
+from datetime import datetime
 
 API_BASE = "https://package-confirmation-app.vercel.app"
 API_KEY = "promos-label-2024"
-
-import re
+UPLOAD_KEY = "promos-ink-2024"
 
 def normalize_tracking(tracking):
     """Normalize tracking number - uppercase, alphanumeric only"""
     return re.sub(r'[^A-Za-z0-9]', '', tracking).upper()
+
+def get_today():
+    """Get today's date in YYYY-MM-DD format"""
+    return datetime.now().strftime('%Y-%m-%d')
 
 def build_index():
     print("=" * 60)
@@ -31,6 +37,8 @@ def build_index():
     print(f"Found {len(manifests)} manifests in cloud")
     
     index = {}
+    combined_records = []  # For combined manifest with full details
+    today = get_today()
     
     # Process S&S manifests
     ss_files = [m for m in manifests if m.get('type') == 'ss']
@@ -54,18 +62,42 @@ def build_index():
                 elif 'customer' in col_lower or 'decorator' in col_lower or 'company' in col_lower:
                     customer_col = col
             
+            # Find additional columns
+            style_col = next((c for c in df.columns if 'style' in str(c).lower()), None)
+            color_col = next((c for c in df.columns if 'color' in str(c).lower()), None)
+            size_col = next((c for c in df.columns if 'size' in str(c).lower()), None)
+            qty_col = next((c for c in df.columns if 'qty' in str(c).lower() or 'quantity' in str(c).lower()), None)
+            ship_date_col = next((c for c in df.columns if 'ship' in str(c).lower() and 'date' in str(c).lower()), None)
+            
             if tracking_col:
                 count = 0
                 for _, row in df.iterrows():
                     tracking = str(row.get(tracking_col, '')).strip()
                     if tracking and tracking != 'nan' and len(tracking) > 5:
                         normalized = normalize_tracking(tracking)
+                        po = str(row.get(po_col, '')).strip() if po_col else ''
+                        customer = str(row.get(customer_col, '')).strip() if customer_col else ''
+                        ship_date = str(row.get(ship_date_col, '')).strip() if ship_date_col else ''
+                        
                         index[normalized] = {
                             'source': 'ss',
                             'sourceType': 'ss',
-                            'po': str(row.get(po_col, '')).strip() if po_col else '',
-                            'customer': str(row.get(customer_col, '')).strip() if customer_col else ''
+                            'po': po,
+                            'customer': customer
                         }
+                        
+                        combined_records.append({
+                            'tracking': tracking,
+                            'po': po,
+                            'customer': customer,
+                            'source': 'ss',
+                            'shipDate': ship_date[:10] if ship_date else '',
+                            'addedDate': today,
+                            'style': str(row.get(style_col, '')).strip() if style_col else '',
+                            'color': str(row.get(color_col, '')).strip() if color_col else '',
+                            'size': str(row.get(size_col, '')).strip() if size_col else '',
+                            'qty': int(row.get(qty_col, 0)) if qty_col and pd.notna(row.get(qty_col)) else 0
+                        })
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
         except Exception as e:
@@ -93,18 +125,42 @@ def build_index():
                 elif 'customer' in col_lower or 'ship to' in col_lower or 'company' in col_lower:
                     customer_col = col
             
+            # Find additional columns
+            style_col = next((c for c in df.columns if 'style' in str(c).lower()), None)
+            color_col = next((c for c in df.columns if 'color' in str(c).lower()), None)
+            size_col = next((c for c in df.columns if 'size' in str(c).lower()), None)
+            qty_col = next((c for c in df.columns if 'qty' in str(c).lower() or 'shipped' in str(c).lower()), None)
+            ship_date_col = next((c for c in df.columns if 'ship' in str(c).lower() and 'date' in str(c).lower()), None)
+            
             if tracking_col:
                 count = 0
                 for _, row in df.iterrows():
                     tracking = str(row.get(tracking_col, '')).strip()
                     if tracking and tracking != 'nan' and len(tracking) > 5:
                         normalized = normalize_tracking(tracking)
+                        po = str(row.get(po_col, '')).strip() if po_col else ''
+                        customer = str(row.get(customer_col, '')).strip() if customer_col else ''
+                        ship_date = str(row.get(ship_date_col, '')).strip() if ship_date_col else ''
+                        
                         index[normalized] = {
                             'source': 'sanmar',
                             'sourceType': 'sanmar',
-                            'po': str(row.get(po_col, '')).strip() if po_col else '',
-                            'customer': str(row.get(customer_col, '')).strip() if customer_col else ''
+                            'po': po,
+                            'customer': customer
                         }
+                        
+                        combined_records.append({
+                            'tracking': tracking,
+                            'po': po,
+                            'customer': customer,
+                            'source': 'sanmar',
+                            'shipDate': ship_date[:10] if ship_date else '',
+                            'addedDate': today,
+                            'style': str(row.get(style_col, '')).strip() if style_col else '',
+                            'color': str(row.get(color_col, '')).strip() if color_col else '',
+                            'size': str(row.get(size_col, '')).strip() if size_col else '',
+                            'qty': int(row.get(qty_col, 0)) if qty_col and pd.notna(row.get(qty_col)) else 0
+                        })
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
         except Exception as e:
@@ -131,18 +187,42 @@ def build_index():
                 elif 'customer' in col_lower or 'name' in col_lower:
                     customer_col = col
             
+            # Find additional columns
+            style_col = next((c for c in df.columns if 'style' in str(c).lower() or 'product' in str(c).lower()), None)
+            color_col = next((c for c in df.columns if 'color' in str(c).lower()), None)
+            size_col = next((c for c in df.columns if 'size' in str(c).lower()), None)
+            qty_col = next((c for c in df.columns if 'qty' in str(c).lower() or 'quantity' in str(c).lower()), None)
+            due_date_col = next((c for c in df.columns if 'due' in str(c).lower() or 'date' in str(c).lower()), None)
+            
             if tracking_col:
                 count = 0
                 for _, row in df.iterrows():
                     tracking = str(row.get(tracking_col, '')).strip()
                     if tracking and tracking != 'nan' and len(tracking) > 5:
                         normalized = normalize_tracking(tracking)
+                        po = str(row.get(po_col, '')).strip() if po_col else ''
+                        customer = str(row.get(customer_col, '')).strip() if customer_col else ''
+                        due_date = str(row.get(due_date_col, '')).strip() if due_date_col else ''
+                        
                         index[normalized] = {
                             'source': 'customink',
                             'sourceType': 'customink',
-                            'po': str(row.get(po_col, '')).strip() if po_col else '',
-                            'customer': str(row.get(customer_col, '')).strip() if customer_col else ''
+                            'po': po,
+                            'customer': customer
                         }
+                        
+                        combined_records.append({
+                            'tracking': tracking,
+                            'po': po,
+                            'customer': customer,
+                            'source': 'customink',
+                            'shipDate': due_date[:10] if due_date else '',
+                            'addedDate': today,
+                            'style': str(row.get(style_col, '')).strip() if style_col else '',
+                            'color': str(row.get(color_col, '')).strip() if color_col else '',
+                            'size': str(row.get(size_col, '')).strip() if size_col else '',
+                            'qty': int(row.get(qty_col, 0)) if qty_col and pd.notna(row.get(qty_col)) else 0
+                        })
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
         except Exception as e:
@@ -169,18 +249,38 @@ def build_index():
                 elif 'shipper' in col_lower or 'from' in col_lower:
                     shipper_col = col
             
+            # Find additional columns  
+            ship_date_col = next((c for c in df.columns if 'ship' in str(c).lower() and 'date' in str(c).lower()), None)
+            
             if tracking_col:
                 count = 0
                 for _, row in df.iterrows():
                     tracking = str(row.get(tracking_col, '')).strip()
                     if tracking and tracking != 'nan' and len(tracking) > 5:
                         normalized = normalize_tracking(tracking)
+                        po = str(row.get(ref_col, '')).strip() if ref_col else ''
+                        shipper = str(row.get(shipper_col, '')).strip() if shipper_col else ''
+                        ship_date = str(row.get(ship_date_col, '')).strip() if ship_date_col else ''
+                        
                         index[normalized] = {
                             'source': 'inbound',
                             'sourceType': 'inbound',
-                            'po': str(row.get(ref_col, '')).strip() if ref_col else '',
-                            'customer': str(row.get(shipper_col, '')).strip() if shipper_col else ''
+                            'po': po,
+                            'customer': shipper
                         }
+                        
+                        combined_records.append({
+                            'tracking': tracking,
+                            'po': po,
+                            'customer': shipper,
+                            'source': 'inbound',
+                            'shipDate': ship_date[:10] if ship_date else '',
+                            'addedDate': today,
+                            'style': '',
+                            'color': '',
+                            'size': '',
+                            'qty': 0
+                        })
                         count += 1
                 print(f"  {m['filename']}: {count} tracking numbers")
         except Exception as e:
@@ -188,6 +288,7 @@ def build_index():
     
     print(f"\n{'=' * 60}")
     print(f"Total tracking numbers indexed: {len(index)}")
+    print(f"Total combined records: {len(combined_records)}")
     
     # Upload index
     print("\nUploading index to cloud...")
@@ -210,6 +311,25 @@ def build_index():
         print(f"Tracking count: {result.get('trackingCount', 0)}")
     else:
         print(f"ERROR: {response.status_code} - {response.text}")
+    
+    # Upload combined manifest (with 10-day filter applied by API)
+    print("\nUploading combined manifest...")
+    
+    combined_response = requests.post(
+        f"{API_BASE}/api/combined-manifest",
+        headers={
+            'x-api-key': UPLOAD_KEY,
+            'Content-Type': 'application/json'
+        },
+        json={"records": combined_records}
+    )
+    
+    if combined_response.status_code == 200:
+        result = combined_response.json()
+        print(f"SUCCESS! Combined manifest: {result.get('filteredRecords', 0)} records (last 10 days)")
+        print(f"Download: {API_BASE}/api/combined-manifest?format=xlsx")
+    else:
+        print(f"ERROR: {combined_response.status_code} - {combined_response.text}")
     
     return index
 
