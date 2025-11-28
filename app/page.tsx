@@ -6,7 +6,8 @@ import {
   CheckCircle, XCircle, Truck, Clock, AlertTriangle,
   MapPin, Calendar, Building2, RefreshCw, Filter,
   Download, Upload, FileSpreadsheet, Play, Loader2,
-  Users, BarChart3, TrendingUp, ExternalLink, Printer, Eye
+  Users, BarChart3, TrendingUp, ExternalLink, Printer, Eye,
+  FolderOpen, FileUp, File, Trash2
 } from 'lucide-react';
 import TrackingModal from './components/TrackingModal';
 
@@ -208,6 +209,14 @@ interface ReportData {
   };
 }
 
+interface ManifestFile {
+  type: string;
+  filename: string;
+  url: string;
+  size: number;
+  uploadedAt: string;
+}
+
 export default function Home() {
   const [query, setQuery] = useState('');
   const [originZip, setOriginZip] = useState('');
@@ -215,7 +224,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [recentScans, setRecentScans] = useState<RecentScan[]>([]);
   const [recentOutbound, setRecentOutbound] = useState<RecentOutbound[]>([]);
-  const [activeTab, setActiveTab] = useState<'search' | 'inbound' | 'outbound' | 'quantum' | 'batch' | 'suppliers' | 'reports'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'inbound' | 'outbound' | 'quantum' | 'batch' | 'suppliers' | 'reports' | 'manifests'>('search');
   const [stats, setStats] = useState({ inboundTotal: 0, outboundTotal: 0 });
   const [qvStats, setQvStats] = useState<QVStats>({ totalEvents: 0, totalShipments: 0 });
   const [inboundResults, setInboundResults] = useState<InboundShipment[]>([]);
@@ -242,6 +251,11 @@ export default function Home() {
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
 
+  // Manifests state
+  const [manifests, setManifests] = useState<ManifestFile[]>([]);
+  const [manifestsLoading, setManifestsLoading] = useState(false);
+  const [uploadingManifest, setUploadingManifest] = useState(false);
+
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTracking, setModalTracking] = useState('');
@@ -252,6 +266,7 @@ export default function Home() {
     fetchStats();
     fetchQVStats();
     fetchSuppliers();
+    fetchManifests();
   }, []);
 
   const fetchRecent = async () => {
@@ -320,6 +335,49 @@ export default function Home() {
       console.error('Error fetching reports:', error);
     } finally {
       setReportLoading(false);
+    }
+  };
+
+  const fetchManifests = async () => {
+    setManifestsLoading(true);
+    try {
+      const res = await fetch('/api/manifests?action=list');
+      const data = await res.json();
+      setManifests(data.manifests || []);
+    } catch (error) {
+      console.error('Error fetching manifests:', error);
+    } finally {
+      setManifestsLoading(false);
+    }
+  };
+
+  const handleManifestUpload = async (type: string, file: File) => {
+    setUploadingManifest(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('type', type);
+
+      const res = await fetch('/api/manifests', {
+        method: 'POST',
+        headers: {
+          'x-api-key': 'promos-ink-2024'
+        },
+        body: formData
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        alert(`${type} manifest uploaded successfully!`);
+        fetchManifests();
+      } else {
+        alert(`Upload failed: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Error uploading manifest:', error);
+      alert('Upload failed. Please try again.');
+    } finally {
+      setUploadingManifest(false);
     }
   };
 
@@ -594,6 +652,15 @@ export default function Home() {
                   <div className="min-w-0">
                     <p className="text-teal-200 text-[10px] sm:text-xs">Reports</p>
                     <p className="text-base sm:text-lg font-bold text-white">View →</p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-rose-500/20 backdrop-blur-sm rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-rose-400/30 cursor-pointer hover:bg-rose-500/30 active:bg-rose-500/40 transition-colors" onClick={() => { setActiveTab('manifests'); fetchManifests(); }}>
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <FolderOpen className="w-6 h-6 sm:w-8 sm:h-8 text-rose-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-rose-200 text-[10px] sm:text-xs">Manifests</p>
+                    <p className="text-base sm:text-lg font-bold text-white">{manifests.length} files</p>
                   </div>
                 </div>
               </div>
@@ -971,6 +1038,18 @@ export default function Home() {
             >
               <Truck className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               QV
+            </button>
+            <button
+              onClick={() => { setActiveTab('manifests'); fetchManifests(); }}
+              className={`flex-1 min-w-[50px] px-2 sm:px-3 py-2.5 sm:py-3 font-semibold flex items-center justify-center gap-1 sm:gap-2 transition-colors text-xs sm:text-sm whitespace-nowrap ${
+                activeTab === 'manifests' 
+                  ? 'bg-rose-500/20 text-rose-300 border-b-2 border-rose-400' 
+                  : 'text-white/60 hover:bg-white/5 active:bg-white/10'
+              }`}
+            >
+              <FolderOpen className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden md:inline">Manifests</span>
+              <span className="md:hidden">📁</span>
             </button>
           </div>
 
@@ -1513,6 +1592,123 @@ export default function Home() {
                     </div>
                   )
                 )}
+              </div>
+            )}
+
+            {/* Manifests Tab */}
+            {activeTab === 'manifests' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center flex-wrap gap-2">
+                  <h3 className="text-white font-semibold flex items-center gap-2">
+                    <FolderOpen className="w-5 h-5 text-rose-400" />
+                    Manifest Files
+                  </h3>
+                  <button
+                    onClick={fetchManifests}
+                    disabled={manifestsLoading}
+                    className="px-3 py-1.5 bg-rose-500/20 text-rose-300 rounded-lg hover:bg-rose-500/30 transition-colors text-sm flex items-center gap-2"
+                  >
+                    {manifestsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    Refresh
+                  </button>
+                </div>
+
+                {/* Upload Section */}
+                <div className="bg-white/5 rounded-xl p-4">
+                  <h4 className="text-white/80 text-sm font-medium mb-3 flex items-center gap-2">
+                    <FileUp className="w-4 h-4" /> Upload Manifest
+                  </h4>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    {[
+                      { type: 'customink', label: 'CustomInk Orders', color: 'pink' },
+                      { type: 'sanmar', label: 'Sanmar Manifest', color: 'blue' },
+                      { type: 'ss', label: 'S&S Activewear', color: 'green' },
+                      { type: 'inbound', label: 'QV Inbound (CSV)', color: 'amber' },
+                    ].map(({ type, label, color }) => (
+                      <label
+                        key={type}
+                        className={`flex items-center gap-3 p-3 bg-${color}-500/10 hover:bg-${color}-500/20 rounded-xl cursor-pointer transition-colors border border-${color}-400/30`}
+                      >
+                        <Upload className={`w-5 h-5 text-${color}-400`} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white text-sm font-medium truncate">{label}</p>
+                          <p className="text-white/50 text-xs">.xlsx / .csv</p>
+                        </div>
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls,.csv"
+                          className="hidden"
+                          disabled={uploadingManifest}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleManifestUpload(type, file);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  {uploadingManifest && (
+                    <div className="mt-3 flex items-center gap-2 text-white/60 text-sm">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Uploading...
+                    </div>
+                  )}
+                </div>
+
+                {/* Manifest List */}
+                <div className="space-y-2">
+                  <h4 className="text-white/60 text-sm">Uploaded Manifests</h4>
+                  {manifestsLoading ? (
+                    <div className="text-center py-6">
+                      <Loader2 className="w-6 h-6 text-white/40 animate-spin mx-auto" />
+                    </div>
+                  ) : manifests.length === 0 ? (
+                    <div className="text-center py-6">
+                      <File className="w-10 h-10 text-white/20 mx-auto mb-2" />
+                      <p className="text-white/40">No manifests uploaded yet</p>
+                      <p className="text-white/30 text-sm mt-1">Upload files above or use the sync script</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {manifests.map((m, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-xl transition-colors"
+                        >
+                          <File className="w-5 h-5 text-rose-400 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-medium truncate">{m.filename}</p>
+                            <p className="text-white/50 text-xs">
+                              {m.type} • {(m.size / 1024).toFixed(1)} KB • {new Date(m.uploadedAt).toLocaleString()}
+                            </p>
+                          </div>
+                          <a
+                            href={m.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-white/80 text-xs flex items-center gap-1 transition-colors"
+                          >
+                            <Download className="w-3 h-3" /> Download
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* API Info */}
+                <div className="bg-gradient-to-r from-rose-500/10 to-pink-500/10 rounded-xl p-4 border border-rose-400/20">
+                  <h4 className="text-rose-300 text-sm font-medium mb-2">🔌 Auto-Sync API</h4>
+                  <p className="text-white/60 text-xs mb-2">
+                    Upload manifests automatically from your scripts:
+                  </p>
+                  <code className="block bg-black/30 text-green-400 text-[10px] sm:text-xs p-2 rounded font-mono break-all">
+                    python upload_manifest.py --type customink --file &quot;customink_orders.xlsx&quot;
+                  </code>
+                  <p className="text-white/40 text-[10px] mt-2">
+                    Supported types: customink, sanmar, ss, inbound
+                  </p>
+                </div>
               </div>
             )}
           </div>
