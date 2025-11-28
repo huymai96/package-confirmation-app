@@ -93,8 +93,7 @@ export async function GET(request: NextRequest) {
                   destination: upsData.destination 
                     ? `${upsData.destination.city || ''}, ${upsData.destination.state || ''}`
                     : 'Dallas, TX',
-                  shipDate: upsData.shipDate,
-                  deliveredAt: upsData.deliveredAt,
+                  deliveredAt: upsData.actualDelivery,
                   estimatedDelivery: upsData.estimatedDelivery,
                   service: upsData.service,
                   poNumber: upsData.poNumber,
