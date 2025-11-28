@@ -7,59 +7,69 @@ export const dynamic = 'force-dynamic';
 const WEBHOOK_SECRET = process.env.EMAIL_WEBHOOK_SECRET || 'promos-ink-email-2024';
 
 // Map sender/subject patterns to manifest types
+// Order matters! More specific patterns should come first
 const MANIFEST_PATTERNS: Array<{
   type: string;
-  filename: string;
+  defaultExt: string;
   patterns: {
     from?: RegExp[];
     subject?: RegExp[];
   };
 }> = [
   {
-    type: 'sanmar',
-    filename: 'sanmar.xlsx',
+    type: 'ss',
+    defaultExt: 'xlsx',  // S&S sends XLSX
     patterns: {
-      from: [/sanmar/i, /@sanmar\.com/i],
-      subject: [/sanmar/i, /manifest/i, /shipment/i, /order/i]
+      from: [/s\s*&\s*s/i, /ssactivewear/i, /@ssactivewear\.com/i, /ss\s*active/i],
+      subject: [/s\s*&\s*s/i, /ssactivewear/i, /ss\s*active/i]  // Only match if S&S is in subject
     }
   },
   {
-    type: 'ss',
-    filename: 's&s.xlsx',
+    type: 'sanmar',
+    defaultExt: 'csv',  // Sanmar sends CSV
     patterns: {
-      from: [/s\s*&\s*s/i, /ssactivewear/i, /@ssactivewear\.com/i],
-      subject: [/s\s*&\s*s/i, /ssactivewear/i, /manifest/i, /shipment/i]
+      from: [/sanmar/i, /@sanmar\.com/i],
+      subject: [/sanmar/i]  // Only match if "sanmar" is specifically in subject
     }
   },
   {
     type: 'alphabroder',
-    filename: 'alphabroder.xlsx',
+    defaultExt: 'xlsx',
     patterns: {
       from: [/alphabroder/i, /@alphabroder\.com/i],
-      subject: [/alphabroder/i, /manifest/i, /shipment/i]
+      subject: [/alphabroder/i]
     }
   }
 ];
 
-function detectManifestType(from: string, subject: string): { type: string; filename: string } | null {
+function detectManifestType(from: string, subject: string): { type: string; defaultExt: string } | null {
+  console.log(`Detecting manifest type - From: "${from}", Subject: "${subject}"`);
+  
   for (const pattern of MANIFEST_PATTERNS) {
-    // Check from patterns
+    // Check from patterns first (more reliable)
     if (pattern.patterns.from) {
       for (const regex of pattern.patterns.from) {
         if (regex.test(from)) {
-          return { type: pattern.type, filename: pattern.filename };
-        }
-      }
-    }
-    // Check subject patterns
-    if (pattern.patterns.subject) {
-      for (const regex of pattern.patterns.subject) {
-        if (regex.test(subject)) {
-          return { type: pattern.type, filename: pattern.filename };
+          console.log(`Matched ${pattern.type} by FROM pattern: ${regex}`);
+          return { type: pattern.type, defaultExt: pattern.defaultExt };
         }
       }
     }
   }
+  
+  // Then check subject patterns
+  for (const pattern of MANIFEST_PATTERNS) {
+    if (pattern.patterns.subject) {
+      for (const regex of pattern.patterns.subject) {
+        if (regex.test(subject)) {
+          console.log(`Matched ${pattern.type} by SUBJECT pattern: ${regex}`);
+          return { type: pattern.type, defaultExt: pattern.defaultExt };
+        }
+      }
+    }
+  }
+  
+  console.log('No manifest type detected');
   return null;
 }
 
@@ -274,31 +284,41 @@ export async function POST(request: NextRequest) {
 
       // Determine manifest type from detection or filename
       let manifestType = detected?.type;
+      let defaultExt = detected?.defaultExt || 'csv';
       
-      // Preserve original file extension
+      // Preserve original file extension from attachment
       const originalExt = attachment.filename.toLowerCase().split('.').pop() || 'csv';
       
       if (!manifestType) {
         // Try to detect from attachment filename
         const lowerFilename = attachment.filename.toLowerCase();
-        if (lowerFilename.includes('sanmar') || lowerFilename.includes('freight')) {
-          manifestType = 'sanmar';
-        } else if (lowerFilename.includes('s&s') || lowerFilename.includes('ss') || lowerFilename.includes('activewear')) {
+        if (lowerFilename.includes('s&s') || lowerFilename.includes('ssactivewear') || lowerFilename.includes('ss active') || lowerFilename.includes('ss_active')) {
           manifestType = 'ss';
+          defaultExt = 'xlsx';
+        } else if (lowerFilename.includes('sanmar') || lowerFilename.includes('freight')) {
+          manifestType = 'sanmar';
+          defaultExt = 'csv';
         } else {
           manifestType = 'unknown';
         }
       }
       
+      // Use original extension from file, or default for the supplier
+      const finalExt = ['xlsx', 'xls', 'csv'].includes(originalExt) ? originalExt : defaultExt;
+      
       // Set target filename with correct extension
       let targetFilename: string;
       if (manifestType === 'sanmar') {
-        targetFilename = `sanmar.${originalExt}`;
+        targetFilename = `sanmar.${finalExt}`;
       } else if (manifestType === 'ss') {
-        targetFilename = `s&s.${originalExt}`;
+        targetFilename = `s&s.${finalExt}`;
+      } else if (manifestType === 'alphabroder') {
+        targetFilename = `alphabroder.${finalExt}`;
       } else {
         targetFilename = attachment.filename;
       }
+      
+      console.log(`Manifest type: ${manifestType}, Original ext: ${originalExt}, Final ext: ${finalExt}, Target: ${targetFilename}`);
 
       try {
         // Handle both raw text and base64 encoded content
