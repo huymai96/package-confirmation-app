@@ -1035,3 +1035,4 @@ GET /api/reports?action=summary&days=7
 | Batch Track | 50 per request | To avoid carrier rate limits |
 | Manifests | Unlimited | Blob storage operations |
 
+

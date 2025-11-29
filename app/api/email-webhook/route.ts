@@ -3,6 +3,44 @@ import { put, list, del } from '@vercel/blob';
 
 export const dynamic = 'force-dynamic';
 
+// Cron secret for triggering rebuilds
+const CRON_SECRET = process.env.CRON_SECRET || 'promos-ink-cron-2024';
+
+// Function to trigger combine + rebuild asynchronously
+async function triggerCronJobs() {
+  const baseUrl = process.env.VERCEL_URL 
+    ? `https://${process.env.VERCEL_URL}` 
+    : 'https://package-confirmation-app.vercel.app';
+  
+  console.log('Triggering cron jobs after manifest upload...');
+  
+  // Trigger combine-manifests (don't await - fire and forget)
+  fetch(`${baseUrl}/api/cron/combine-manifests`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${CRON_SECRET}`
+    }
+  }).then(r => {
+    console.log(`Combine manifests triggered: ${r.status}`);
+  }).catch(e => {
+    console.log('Combine manifests trigger failed (non-blocking):', e);
+  });
+  
+  // Wait a bit then trigger rebuild-index
+  setTimeout(() => {
+    fetch(`${baseUrl}/api/cron/rebuild-index`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${CRON_SECRET}`
+      }
+    }).then(r => {
+      console.log(`Rebuild index triggered: ${r.status}`);
+    }).catch(e => {
+      console.log('Rebuild index trigger failed (non-blocking):', e);
+    });
+  }, 5000); // Wait 5 seconds for combine to complete
+}
+
 // Webhook secret for security (set in Vercel env vars)
 // Security model:
 // 1. Make.com Mailhook URL is secret (only receiving@promosink.com knows it)
@@ -473,13 +511,23 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Check if any manifests were successfully uploaded
+    const successfulUploads = results.filter(r => r.uploaded);
+    
+    // Trigger cron jobs if we uploaded any manifests
+    if (successfulUploads.length > 0) {
+      // Fire and forget - don't block the response
+      triggerCronJobs();
+    }
+    
     return NextResponse.json({
       success: true,
       message: `Processed ${results.length} attachment(s)`,
       from,
       subject,
       detectedType: detected?.type || 'unknown',
-      results
+      results,
+      cronTriggered: successfulUploads.length > 0
     });
 
   } catch (error) {

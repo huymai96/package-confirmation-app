@@ -35,6 +35,7 @@ MANIFEST_UPLOAD_KEY=promos-ink-2024
 LABEL_API_KEY=promos-label-2024
 SYNC_SECRET=promos-sync-2024
 EMAIL_WEBHOOK_SECRET=promos-ink-email-2024
+CRON_SECRET=promos-ink-cron-2024
 ```
 
 ---
@@ -107,6 +108,7 @@ EMAIL_WEBHOOK_SECRET=promos-ink-email-2024
 | `LABEL_API_KEY` | API key for label lookup operations | No | `promos-label-2024` | Dev, Staging, Prod |
 | `SYNC_SECRET` | Bearer token for sync API | No | `promos-sync-2024` | Dev, Staging, Prod |
 | `EMAIL_WEBHOOK_SECRET` | Secret for Make.com webhook | No | `promos-ink-email-2024` | Prod |
+| `CRON_SECRET` | Secret for Vercel cron job authentication | No | `promos-ink-cron-2024` | Prod |
 
 **Security Notes:**
 - Change default values in production!
