@@ -27,6 +27,7 @@ UPS_ACCOUNT_NUMBERS=E45A82,W34D92,W34G18,K9Y228
 FEDEX_API_KEY=your_fedex_api_key
 FEDEX_SECRET_KEY=your_fedex_secret_key
 FEDEX_ACCOUNT_NUMBERS=123456789,987654321
+FEDEX_WEBHOOK_TOKEN=your_webhook_security_token
 
 # ============================================
 # API AUTHENTICATION KEYS
@@ -85,8 +86,15 @@ CRON_SECRET=promos-ink-cron-2024
 | `FEDEX_API_KEY` | API Key from FedEx Developer Portal | No* | `l7abc123def456` | Dev, Staging, Prod |
 | `FEDEX_SECRET_KEY` | Secret Key from FedEx Developer Portal | No* | `secretkey123` | Dev, Staging, Prod |
 | `FEDEX_ACCOUNT_NUMBERS` | Comma-separated FedEx account numbers | No* | `123456789,987654321` | Prod |
+| `FEDEX_WEBHOOK_TOKEN` | Security token for AIV webhook validation | No* | `PromosInk2024...` | Prod |
 
 *Required for FedEx tracking functionality
+
+**FedEx AIV Webhook Setup:**
+1. Go to FedEx Developer Portal → Your Project → Webhooks
+2. Create subscription with URL: `https://your-domain.vercel.app/api/webhooks/fedex`
+3. Set security token in FedEx portal
+4. Add same token as `FEDEX_WEBHOOK_TOKEN` in Vercel environment variables
 
 **How to get:**
 1. Register at [FedEx Developer Portal](https://developer.fedex.com)

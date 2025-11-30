@@ -92,24 +92,75 @@ async function cleanupOldEvents(): Promise<void> {
   }
 }
 
+// FedEx Webhook Security Token
+const FEDEX_WEBHOOK_TOKEN = process.env.FEDEX_WEBHOOK_TOKEN || '';
+
+/**
+ * Validate FedEx webhook security token
+ * FedEx may send the token in different headers
+ */
+function validateWebhookToken(request: Request): { valid: boolean; error?: string } {
+  // If no token configured, skip validation (development mode)
+  if (!FEDEX_WEBHOOK_TOKEN) {
+    console.log('FedEx webhook: No FEDEX_WEBHOOK_TOKEN configured, skipping validation');
+    return { valid: true };
+  }
+  
+  // Check various header formats that FedEx might use
+  const token = 
+    request.headers.get('x-fedex-security-token') ||
+    request.headers.get('x-fedex-webhook-token') ||
+    request.headers.get('x-security-token') ||
+    request.headers.get('authorization')?.replace('Bearer ', '') ||
+    request.headers.get('x-api-key');
+  
+  if (!token) {
+    console.log('FedEx webhook: No security token provided in headers');
+    // Log all headers for debugging
+    const headers: Record<string, string> = {};
+    request.headers.forEach((value, key) => {
+      headers[key] = key.toLowerCase().includes('token') || key.toLowerCase().includes('auth') 
+        ? '[REDACTED]' 
+        : value;
+    });
+    console.log('FedEx webhook headers:', JSON.stringify(headers));
+    return { valid: false, error: 'No security token provided' };
+  }
+  
+  if (token !== FEDEX_WEBHOOK_TOKEN) {
+    console.log('FedEx webhook: Invalid security token');
+    return { valid: false, error: 'Invalid security token' };
+  }
+  
+  return { valid: true };
+}
+
 /**
  * FedEx Advanced Integrated Visibility (AIV) Webhook Handler
  * 
  * FedEx will send tracking updates to this endpoint when configured.
  * Events include: pickup, in transit, out for delivery, delivered, exceptions
  * 
- * To activate:
- * 1. Go to FedEx Developer Portal
- * 2. Create/select your project
- * 3. Enable "Track API" and "FedEx Advanced Integrated Visibility"
- * 4. Register webhook URL: https://package-confirmation-app.vercel.app/api/webhooks/fedex
- * 5. Select tracking event types to receive
+ * Security: Validates FEDEX_WEBHOOK_TOKEN from environment
+ * Project: AIV
+ * Token: Configured in FedEx Developer Portal
  */
 export async function POST(request: Request) {
   try {
+    // Validate security token first
+    const tokenValidation = validateWebhookToken(request);
+    if (!tokenValidation.valid) {
+      console.log(`FedEx webhook rejected: ${tokenValidation.error}`);
+      // Return 401 for invalid token
+      return NextResponse.json(
+        { error: tokenValidation.error },
+        { status: 401 }
+      );
+    }
+    
     const payload = await request.json();
     
-    console.log('FedEx Webhook received:', JSON.stringify(payload, null, 2).substring(0, 500));
+    console.log('FedEx Webhook received (authenticated):', JSON.stringify(payload, null, 2).substring(0, 500));
 
     // Generate unique event ID with timestamp
     const timestamp = new Date().toISOString();
@@ -190,21 +241,37 @@ export async function GET(request: Request) {
   try {
     // Return webhook status
     if (action === 'status') {
+      const { blobs } = await list({ prefix: EVENTS_BLOB_PREFIX });
       const events = await getStoredEvents(1);
+      const totalEvents = blobs.length;
       
       return NextResponse.json({
         endpoint: '/api/webhooks/fedex',
-        status: 'active',
+        status: totalEvents > 0 ? 'active_receiving' : 'active_waiting',
+        projectName: 'AIV',
+        security: {
+          tokenConfigured: !!FEDEX_WEBHOOK_TOKEN,
+          tokenLength: FEDEX_WEBHOOK_TOKEN ? FEDEX_WEBHOOK_TOKEN.length : 0
+        },
         storage: 'vercel-blob',
         maxEventsStored: MAX_EVENTS_STORED,
+        totalEventsReceived: totalEvents,
         lastEvent: events.length > 0 ? {
           id: events[0].id,
           receivedAt: events[0].receivedAt,
           trackingNumber: events[0].trackingNumber,
-          status: events[0].statusDescription
+          status: events[0].statusDescription,
+          eventType: events[0].eventType
         } : null,
-        message: 'FedEx Advanced Integrated Visibility webhook is ready',
-        note: 'Events are persisted in Vercel Blob storage'
+        message: totalEvents > 0 
+          ? `FedEx AIV active - ${totalEvents} events received`
+          : 'FedEx AIV webhook ready - waiting for events from FedEx',
+        note: 'Events are persisted in Vercel Blob storage',
+        aivProject: {
+          name: 'AIV',
+          webhookUrl: 'https://package-confirmation-app.vercel.app/api/webhooks/fedex',
+          status: totalEvents > 0 ? 'Connected' : 'Pending first event'
+        }
       });
     }
 
