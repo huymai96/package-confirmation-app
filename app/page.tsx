@@ -240,6 +240,11 @@ export default function Home() {
   const [qvData, setQvData] = useState<QVData>({ inbound: [], outbound: [], thirdParty: [], arrivingToday: [], exceptions: [] });
   const [qvLoading, setQvLoading] = useState(false);
   const [qvSubTab, setQvSubTab] = useState<'inbound' | 'outbound' | 'arriving' | 'exceptions'>('inbound');
+  const [qvCarrier, setQvCarrier] = useState<'ups' | 'fedex' | 'all'>('all');
+  
+  // FedEx Visibility state
+  const [fedexData, setFedexData] = useState<QVData>({ inbound: [], outbound: [], thirdParty: [], arrivingToday: [], exceptions: [] });
+  const [fedexLoading, setFedexLoading] = useState(false);
 
   // Suppliers state
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -462,6 +467,39 @@ export default function Home() {
     } finally {
       setQvLoading(false);
     }
+  };
+
+  // Refresh FedEx Visibility data
+  const refreshFedExVisibility = async () => {
+    setFedexLoading(true);
+    try {
+      const [allRes, arrivingRes, exceptionsRes] = await Promise.all([
+        fetch('/api/fedex-visibility?action=all&limit=50'),
+        fetch('/api/fedex-visibility?action=arriving-today&limit=50'),
+        fetch('/api/fedex-visibility?action=exceptions&limit=50')
+      ]);
+      
+      const allData = await allRes.json();
+      const arrivingData = await arrivingRes.json();
+      const exceptionsData = await exceptionsRes.json();
+      
+      setFedexData({
+        inbound: allData.inbound?.shipments || [],
+        outbound: allData.outbound?.shipments || [],
+        thirdParty: [],
+        arrivingToday: arrivingData.shipments || [],
+        exceptions: exceptionsData.shipments || []
+      });
+    } catch (error) {
+      console.error('FedEx Visibility refresh error:', error);
+    } finally {
+      setFedexLoading(false);
+    }
+  };
+
+  // Refresh all carrier visibility
+  const refreshAllVisibility = async () => {
+    await Promise.all([refreshQuantumView(), refreshFedExVisibility()]);
   };
 
   // Batch tracking function
@@ -1529,82 +1567,292 @@ export default function Home() {
               </div>
             )}
 
-            {/* Quantum View Tab */}
+            {/* Quantum View Tab - Combined UPS & FedEx Visibility */}
             {activeTab === 'quantum' && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex gap-2">
+                {/* Carrier Selection */}
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex gap-1 bg-white/5 rounded-lg p-1">
                     <button
-                      onClick={() => setQvSubTab('inbound')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                        qvSubTab === 'inbound' ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                      onClick={() => setQvCarrier('all')}
+                      className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                        qvCarrier === 'all' ? 'bg-gradient-to-r from-amber-500 to-purple-500 text-white' : 'text-white/60 hover:bg-white/10'
                       }`}
                     >
-                      📥 Inbound ({qvData.inbound.length})
+                      All Carriers
                     </button>
                     <button
-                      onClick={() => setQvSubTab('outbound')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                        qvSubTab === 'outbound' ? 'bg-green-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                      onClick={() => setQvCarrier('ups')}
+                      className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                        qvCarrier === 'ups' ? 'bg-amber-500 text-white' : 'text-white/60 hover:bg-white/10'
                       }`}
                     >
-                      📤 Outbound ({qvData.outbound.length})
+                      🟤 UPS
                     </button>
                     <button
-                      onClick={() => setQvSubTab('arriving')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                        qvSubTab === 'arriving' ? 'bg-amber-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                      onClick={() => setQvCarrier('fedex')}
+                      className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                        qvCarrier === 'fedex' ? 'bg-purple-500 text-white' : 'text-white/60 hover:bg-white/10'
                       }`}
                     >
-                      🚚 Today ({qvData.arrivingToday.length})
-                    </button>
-                    <button
-                      onClick={() => setQvSubTab('exceptions')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                        qvSubTab === 'exceptions' ? 'bg-red-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
-                      }`}
-                    >
-                      ⚠️ Exceptions ({qvData.exceptions.length})
+                      🟣 FedEx
                     </button>
                   </div>
                   <button
-                    onClick={refreshQuantumView}
-                    disabled={qvLoading}
-                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1"
+                    onClick={refreshAllVisibility}
+                    disabled={qvLoading || fedexLoading}
+                    className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-purple-500 hover:from-amber-600 hover:to-purple-600 disabled:from-gray-500 disabled:to-gray-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1"
                   >
-                    {qvLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                    Refresh
+                    {(qvLoading || fedexLoading) ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                    Refresh All
                   </button>
                 </div>
 
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-center">
-                  <p className="text-amber-300 text-sm">
-                    ⏳ UPS Quantum View Download (QVD) activation pending
-                  </p>
-                  <p className="text-amber-200/60 text-xs mt-1">
-                    Contact UPS to activate CompanyQVD and UserQVD for API access
-                  </p>
+                {/* View Tabs */}
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => setQvSubTab('inbound')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                      qvSubTab === 'inbound' ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                    }`}
+                  >
+                    📥 Inbound ({
+                      qvCarrier === 'ups' ? qvData.inbound.length :
+                      qvCarrier === 'fedex' ? fedexData.inbound.length :
+                      qvData.inbound.length + fedexData.inbound.length
+                    })
+                  </button>
+                  <button
+                    onClick={() => setQvSubTab('outbound')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                      qvSubTab === 'outbound' ? 'bg-green-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                    }`}
+                  >
+                    📤 Outbound ({
+                      qvCarrier === 'ups' ? qvData.outbound.length :
+                      qvCarrier === 'fedex' ? fedexData.outbound.length :
+                      qvData.outbound.length + fedexData.outbound.length
+                    })
+                  </button>
+                  <button
+                    onClick={() => setQvSubTab('arriving')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                      qvSubTab === 'arriving' ? 'bg-amber-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                    }`}
+                  >
+                    🚚 Today ({
+                      qvCarrier === 'ups' ? qvData.arrivingToday.length :
+                      qvCarrier === 'fedex' ? fedexData.arrivingToday.length :
+                      qvData.arrivingToday.length + fedexData.arrivingToday.length
+                    })
+                  </button>
+                  <button
+                    onClick={() => setQvSubTab('exceptions')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                      qvSubTab === 'exceptions' ? 'bg-red-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                    }`}
+                  >
+                    ⚠️ Exceptions ({
+                      qvCarrier === 'ups' ? qvData.exceptions.length :
+                      qvCarrier === 'fedex' ? fedexData.exceptions.length :
+                      qvData.exceptions.length + fedexData.exceptions.length
+                    })
+                  </button>
                 </div>
 
+                {/* Status Info */}
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
+                    <p className="text-amber-300 text-xs font-medium flex items-center gap-2">
+                      🟤 UPS Quantum View
+                      {qvLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                    </p>
+                    <p className="text-amber-200/60 text-xs mt-1">
+                      {qvStats.totalShipments > 0 ? `${qvStats.totalShipments} shipments` : 'Awaiting QVD activation'}
+                    </p>
+                  </div>
+                  <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3">
+                    <p className="text-purple-300 text-xs font-medium flex items-center gap-2">
+                      🟣 FedEx Visibility
+                      {fedexLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                    </p>
+                    <p className="text-purple-200/60 text-xs mt-1">
+                      {fedexData.inbound.length + fedexData.outbound.length > 0 
+                        ? `${fedexData.inbound.length + fedexData.outbound.length} shipments (polling)` 
+                        : 'Click Refresh to load'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Shipment List */}
                 {qvSubTab === 'inbound' && (
-                  qvData.inbound.length === 0 ? (
-                    <div className="text-center py-6">
-                      <p className="text-white/40">No inbound shipments from Quantum View yet</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
-                      {qvData.inbound.map((ship, i) => (
-                        <button
-                          key={i}
-                          onClick={() => handleSearch(ship.trackingNumber)}
-                          className="w-full text-left p-3 bg-blue-500/10 hover:bg-blue-500/20 rounded-xl transition-colors"
-                        >
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {/* UPS Inbound */}
+                    {(qvCarrier === 'ups' || qvCarrier === 'all') && qvData.inbound.map((ship, i) => (
+                      <button
+                        key={`ups-${i}`}
+                        onClick={() => handleSearch(ship.trackingNumber)}
+                        className="w-full text-left p-3 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="bg-amber-600 text-white text-[10px] px-1.5 py-0.5 rounded">UPS</span>
                           <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
-                          <p className="text-blue-300 text-xs">From: {ship.shipperName || ship.shipperAddress}</p>
-                        </button>
-                      ))}
-                    </div>
-                  )
+                        </div>
+                        <p className="text-amber-300 text-xs mt-1">From: {ship.shipperName || ship.shipperAddress}</p>
+                      </button>
+                    ))}
+                    {/* FedEx Inbound */}
+                    {(qvCarrier === 'fedex' || qvCarrier === 'all') && fedexData.inbound.map((ship, i) => (
+                      <button
+                        key={`fedex-${i}`}
+                        onClick={() => handleSearch(ship.trackingNumber)}
+                        className="w-full text-left p-3 bg-purple-500/10 hover:bg-purple-500/20 rounded-xl transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="bg-purple-600 text-white text-[10px] px-1.5 py-0.5 rounded">FedEx</span>
+                          <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                        </div>
+                        <p className="text-purple-300 text-xs mt-1">From: {ship.shipperName || ship.shipperAddress}</p>
+                      </button>
+                    ))}
+                    {/* Empty State */}
+                    {((qvCarrier === 'ups' && qvData.inbound.length === 0) ||
+                      (qvCarrier === 'fedex' && fedexData.inbound.length === 0) ||
+                      (qvCarrier === 'all' && qvData.inbound.length === 0 && fedexData.inbound.length === 0)) && (
+                      <div className="text-center py-6">
+                        <p className="text-white/40">No inbound shipments</p>
+                        <p className="text-white/30 text-xs mt-1">Click Refresh to load carrier data</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {qvSubTab === 'outbound' && (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {/* UPS Outbound */}
+                    {(qvCarrier === 'ups' || qvCarrier === 'all') && qvData.outbound.map((ship, i) => (
+                      <button
+                        key={`ups-${i}`}
+                        onClick={() => handleSearch(ship.trackingNumber)}
+                        className="w-full text-left p-3 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="bg-amber-600 text-white text-[10px] px-1.5 py-0.5 rounded">UPS</span>
+                          <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                        </div>
+                        <p className="text-green-300 text-xs mt-1">To: {ship.recipientName || ship.recipientAddress}</p>
+                      </button>
+                    ))}
+                    {/* FedEx Outbound */}
+                    {(qvCarrier === 'fedex' || qvCarrier === 'all') && fedexData.outbound.map((ship, i) => (
+                      <button
+                        key={`fedex-${i}`}
+                        onClick={() => handleSearch(ship.trackingNumber)}
+                        className="w-full text-left p-3 bg-purple-500/10 hover:bg-purple-500/20 rounded-xl transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="bg-purple-600 text-white text-[10px] px-1.5 py-0.5 rounded">FedEx</span>
+                          <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                        </div>
+                        <p className="text-green-300 text-xs mt-1">To: {ship.recipientName || ship.recipientAddress}</p>
+                      </button>
+                    ))}
+                    {/* Empty State */}
+                    {((qvCarrier === 'ups' && qvData.outbound.length === 0) ||
+                      (qvCarrier === 'fedex' && fedexData.outbound.length === 0) ||
+                      (qvCarrier === 'all' && qvData.outbound.length === 0 && fedexData.outbound.length === 0)) && (
+                      <div className="text-center py-6">
+                        <p className="text-white/40">No outbound shipments</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {qvSubTab === 'arriving' && (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {/* UPS Arriving Today */}
+                    {(qvCarrier === 'ups' || qvCarrier === 'all') && qvData.arrivingToday.map((ship, i) => (
+                      <button
+                        key={`ups-${i}`}
+                        onClick={() => handleSearch(ship.trackingNumber)}
+                        className="w-full text-left p-3 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="bg-amber-600 text-white text-[10px] px-1.5 py-0.5 rounded">UPS</span>
+                          <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                          <span className="bg-amber-500/30 text-amber-300 text-[10px] px-1.5 py-0.5 rounded ml-auto">TODAY</span>
+                        </div>
+                        <p className="text-amber-300 text-xs mt-1">From: {ship.shipperName || ship.shipperAddress}</p>
+                      </button>
+                    ))}
+                    {/* FedEx Arriving Today */}
+                    {(qvCarrier === 'fedex' || qvCarrier === 'all') && fedexData.arrivingToday.map((ship, i) => (
+                      <button
+                        key={`fedex-${i}`}
+                        onClick={() => handleSearch(ship.trackingNumber)}
+                        className="w-full text-left p-3 bg-purple-500/10 hover:bg-purple-500/20 rounded-xl transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="bg-purple-600 text-white text-[10px] px-1.5 py-0.5 rounded">FedEx</span>
+                          <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                          <span className="bg-purple-500/30 text-purple-300 text-[10px] px-1.5 py-0.5 rounded ml-auto">TODAY</span>
+                        </div>
+                        <p className="text-purple-300 text-xs mt-1">From: {ship.shipperName || ship.shipperAddress}</p>
+                      </button>
+                    ))}
+                    {/* Empty State */}
+                    {((qvCarrier === 'ups' && qvData.arrivingToday.length === 0) ||
+                      (qvCarrier === 'fedex' && fedexData.arrivingToday.length === 0) ||
+                      (qvCarrier === 'all' && qvData.arrivingToday.length === 0 && fedexData.arrivingToday.length === 0)) && (
+                      <div className="text-center py-6">
+                        <p className="text-white/40">No packages arriving today</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {qvSubTab === 'exceptions' && (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {/* UPS Exceptions */}
+                    {(qvCarrier === 'ups' || qvCarrier === 'all') && qvData.exceptions.map((ship, i) => (
+                      <button
+                        key={`ups-${i}`}
+                        onClick={() => handleSearch(ship.trackingNumber)}
+                        className="w-full text-left p-3 bg-red-500/10 hover:bg-red-500/20 rounded-xl transition-colors border border-red-500/30"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="bg-amber-600 text-white text-[10px] px-1.5 py-0.5 rounded">UPS</span>
+                          <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                          <span className="bg-red-500/30 text-red-300 text-[10px] px-1.5 py-0.5 rounded ml-auto">⚠️ EXCEPTION</span>
+                        </div>
+                        <p className="text-red-300 text-xs mt-1">{ship.status}</p>
+                      </button>
+                    ))}
+                    {/* FedEx Exceptions */}
+                    {(qvCarrier === 'fedex' || qvCarrier === 'all') && fedexData.exceptions.map((ship, i) => (
+                      <button
+                        key={`fedex-${i}`}
+                        onClick={() => handleSearch(ship.trackingNumber)}
+                        className="w-full text-left p-3 bg-red-500/10 hover:bg-red-500/20 rounded-xl transition-colors border border-red-500/30"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="bg-purple-600 text-white text-[10px] px-1.5 py-0.5 rounded">FedEx</span>
+                          <p className="font-mono text-white text-sm">{ship.trackingNumber}</p>
+                          <span className="bg-red-500/30 text-red-300 text-[10px] px-1.5 py-0.5 rounded ml-auto">⚠️ EXCEPTION</span>
+                        </div>
+                        <p className="text-red-300 text-xs mt-1">{ship.status}</p>
+                      </button>
+                    ))}
+                    {/* Empty State */}
+                    {((qvCarrier === 'ups' && qvData.exceptions.length === 0) ||
+                      (qvCarrier === 'fedex' && fedexData.exceptions.length === 0) ||
+                      (qvCarrier === 'all' && qvData.exceptions.length === 0 && fedexData.exceptions.length === 0)) && (
+                      <div className="text-center py-6">
+                        <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
+                        <p className="text-green-400">No exceptions! 🎉</p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}

@@ -364,3 +364,234 @@ export function isFedExTracking(tracking: string): boolean {
          /^\d{4}\s?\d{4}\s?\d{4}$/.test(cleaned); // Formatted 12-digit
 }
 
+// ============================================
+// FEDEX VISIBILITY (Polling-Based)
+// ============================================
+
+// Our warehouse locations for inbound detection
+const WAREHOUSE_LOCATIONS = [
+  { city: 'DALLAS', zip: '75234' },
+  { city: 'DALLAS', zip: '75247' },
+  { city: 'FARMERS BRANCH', zip: '75234' }
+];
+
+export interface FedExVisibilityShipment {
+  trackingNumber: string;
+  shipperName: string;
+  shipperAddress: string;
+  recipientName: string;
+  recipientAddress: string;
+  scheduledDelivery: string;
+  actualDelivery?: string;
+  status: string;
+  statusDescription: string;
+  direction: 'inbound' | 'outbound';
+  service: string;
+  isException: boolean;
+  exceptionReason?: string;
+  lastLocation?: string;
+  lastUpdate?: string;
+  poNumber?: string;
+  shipperReference?: string;
+}
+
+/**
+ * Determine if a shipment is inbound based on destination
+ */
+function isInboundShipment(destination: { city: string; state: string; postalCode: string }): boolean {
+  const destCity = (destination.city || '').toUpperCase();
+  const destZip = (destination.postalCode || '').substring(0, 5);
+  
+  return WAREHOUSE_LOCATIONS.some(loc => 
+    (destCity.includes(loc.city) || loc.city.includes(destCity)) && 
+    destZip.startsWith(loc.zip.substring(0, 3))
+  );
+}
+
+/**
+ * Get visibility data for a batch of FedEx tracking numbers
+ * This is the polling-based equivalent of Quantum View
+ */
+export async function getFedExVisibilityData(trackingNumbers: string[]): Promise<FedExVisibilityShipment[]> {
+  if (!isConfigured()) {
+    console.error('FedEx not configured for visibility');
+    return [];
+  }
+
+  const results: FedExVisibilityShipment[] = [];
+  
+  // Filter to only FedEx tracking numbers
+  const fedexNumbers = trackingNumbers.filter(t => isFedExTracking(t));
+  if (fedexNumbers.length === 0) return [];
+
+  // Process in batches of 30 (FedEx limit)
+  const chunks: string[][] = [];
+  for (let i = 0; i < fedexNumbers.length; i += 30) {
+    chunks.push(fedexNumbers.slice(i, i + 30));
+  }
+
+  for (const chunk of chunks) {
+    try {
+      const token = await getAccessToken();
+      
+      const response = await fetch(
+        `${FEDEX_CONFIG.baseUrl}/track/v1/trackingnumbers`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'X-locale': 'en_US'
+          },
+          body: JSON.stringify({
+            includeDetailedScans: true,
+            trackingInfo: chunk.map(tn => ({
+              trackingNumberInfo: { trackingNumber: tn }
+            }))
+          })
+        }
+      );
+
+      if (!response.ok) {
+        console.error('FedEx visibility batch failed:', response.status);
+        continue;
+      }
+
+      const data = await response.json();
+      const trackResults = data.output?.completeTrackResults || [];
+
+      for (const result of trackResults) {
+        const trackResult = result.trackResults?.[0];
+        if (!trackResult) continue;
+
+        // Skip if tracking not found
+        if (trackResult.error) continue;
+
+        const latestStatus = trackResult.latestStatusDetail || {};
+        const scanEvents = trackResult.scanEvents || [];
+        const dateAndTimes = trackResult.dateAndTimes || [];
+        
+        // Get delivery dates
+        const estimatedDelivery = dateAndTimes.find((d: any) => d.type === 'ESTIMATED_DELIVERY')?.dateTime;
+        const actualDelivery = dateAndTimes.find((d: any) => d.type === 'ACTUAL_DELIVERY')?.dateTime;
+
+        // Determine direction based on destination
+        const destination = {
+          city: trackResult.destinationLocation?.locationContactAndAddress?.address?.city || '',
+          state: trackResult.destinationLocation?.locationContactAndAddress?.address?.stateOrProvinceCode || '',
+          postalCode: trackResult.destinationLocation?.locationContactAndAddress?.address?.postalCode || ''
+        };
+        
+        const direction = isInboundShipment(destination) ? 'inbound' : 'outbound';
+
+        // Check for exceptions
+        const isException = latestStatus?.statusByLocale?.toLowerCase().includes('exception') ||
+                          latestStatus?.code === 'DE' || 
+                          latestStatus?.code === 'SE' ||
+                          latestStatus?.code === 'CA';
+
+        // Extract reference numbers
+        const shipmentDetails = trackResult.shipmentDetails || {};
+        const packageDetails = trackResult.packageDetails || {};
+        const references = packageDetails.packageContent?.contentPieceList?.[0]?.references || 
+                         shipmentDetails.contents?.[0]?.references || [];
+        
+        let poNumber = '';
+        let shipperReference = '';
+        
+        if (Array.isArray(references)) {
+          for (const ref of references) {
+            const type = (ref.type || ref.referenceType || '').toUpperCase();
+            const value = ref.value || ref.referenceValue || '';
+            
+            if (type.includes('PO') || type.includes('PURCHASE')) {
+              poNumber = value;
+            } else if (!shipperReference && value) {
+              shipperReference = value;
+            }
+          }
+        }
+
+        // Get last scan location
+        const lastScan = scanEvents[0];
+        const lastLocation = lastScan ? 
+          `${lastScan.scanLocation?.city || ''}, ${lastScan.scanLocation?.stateOrProvinceCode || ''}` : '';
+
+        results.push({
+          trackingNumber: trackResult.trackingNumberInfo?.trackingNumber || result.trackingNumber,
+          shipperName: trackResult.shipperInformation?.contact?.companyName || 
+                       trackResult.shipperInformation?.contact?.personName || '',
+          shipperAddress: `${trackResult.originLocation?.locationContactAndAddress?.address?.city || ''}, ${trackResult.originLocation?.locationContactAndAddress?.address?.stateOrProvinceCode || ''}`,
+          recipientName: trackResult.recipientInformation?.contact?.companyName ||
+                        trackResult.recipientInformation?.contact?.personName || '',
+          recipientAddress: `${destination.city}, ${destination.state}`,
+          scheduledDelivery: estimatedDelivery?.split('T')[0] || '',
+          actualDelivery: actualDelivery?.split('T')[0],
+          status: latestStatus?.code || 'Unknown',
+          statusDescription: latestStatus?.statusByLocale || latestStatus?.description || 'Unknown',
+          direction,
+          service: trackResult.serviceDetail?.description || trackResult.serviceType || '',
+          isException,
+          exceptionReason: isException ? latestStatus?.statusByLocale : undefined,
+          lastLocation: lastLocation.replace(/^, |, $/g, ''),
+          lastUpdate: lastScan?.date?.split('T')[0],
+          poNumber,
+          shipperReference
+        });
+      }
+    } catch (error) {
+      console.error('FedEx visibility batch error:', error);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Get inbound FedEx shipments (arriving to our warehouses)
+ */
+export async function getFedExInbound(trackingNumbers: string[]): Promise<FedExVisibilityShipment[]> {
+  const allShipments = await getFedExVisibilityData(trackingNumbers);
+  return allShipments.filter(s => s.direction === 'inbound');
+}
+
+/**
+ * Get outbound FedEx shipments (leaving our warehouses)
+ */
+export async function getFedExOutbound(trackingNumbers: string[]): Promise<FedExVisibilityShipment[]> {
+  const allShipments = await getFedExVisibilityData(trackingNumbers);
+  return allShipments.filter(s => s.direction === 'outbound');
+}
+
+/**
+ * Get FedEx shipments arriving today
+ */
+export async function getFedExArrivingToday(trackingNumbers: string[]): Promise<FedExVisibilityShipment[]> {
+  const allShipments = await getFedExVisibilityData(trackingNumbers);
+  const today = new Date().toISOString().split('T')[0];
+  
+  return allShipments.filter(s => 
+    s.direction === 'inbound' && 
+    s.scheduledDelivery === today &&
+    !s.actualDelivery // Not yet delivered
+  );
+}
+
+/**
+ * Get FedEx exception shipments
+ */
+export async function getFedExExceptions(trackingNumbers: string[]): Promise<FedExVisibilityShipment[]> {
+  const allShipments = await getFedExVisibilityData(trackingNumbers);
+  return allShipments.filter(s => s.isException);
+}
+
+/**
+ * Get FedEx delivered shipments (last 7 days)
+ */
+export async function getFedExDelivered(trackingNumbers: string[]): Promise<FedExVisibilityShipment[]> {
+  const allShipments = await getFedExVisibilityData(trackingNumbers);
+  return allShipments.filter(s => 
+    s.statusDescription?.toLowerCase().includes('delivered') ||
+    s.actualDelivery
+  );
+}
