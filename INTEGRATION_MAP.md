@@ -340,6 +340,140 @@ x-api-key: promos-label-2024
 
 ---
 
+### 3. FedEx Visibility API (Polling-Based)
+
+**Purpose:** FedEx shipment visibility (equivalent to UPS Quantum View).
+
+| Attribute | Value |
+|-----------|-------|
+| **Endpoint** | `/api/fedex-visibility` |
+| **Method** | Polling (Track API-based) |
+| **Data Source** | Sanmar manifests (FedEx Ground) |
+| **Auth** | None (internal API) |
+
+#### API Actions
+
+| Action | Description |
+|--------|-------------|
+| `?action=status` | Check configuration status |
+| `?action=all` | Get all inbound + outbound shipments |
+| `?action=inbound` | Inbound shipments (to our warehouses) |
+| `?action=outbound` | Outbound shipments |
+| `?action=arriving-today` | Packages arriving today |
+| `?action=exceptions` | Delayed/exception shipments |
+| `?action=delivered` | Delivered shipments |
+
+#### Inbound Detection Logic
+
+```typescript
+// Dallas warehouse locations
+const WAREHOUSE_LOCATIONS = [
+  { city: 'DALLAS', zip: '75234' },
+  { city: 'DALLAS', zip: '75247' },
+  { city: 'FARMERS BRANCH', zip: '75234' }
+];
+
+function isInboundShipment(destination) {
+  return WAREHOUSE_LOCATIONS.some(loc => 
+    destination.city.includes(loc.city) && 
+    destination.zip.startsWith(loc.zip.substring(0, 3))
+  );
+}
+```
+
+---
+
+### 4. FedEx Advanced Integrated Visibility (AIV) - Webhook
+
+**Purpose:** Real-time push notifications for FedEx shipments (proactive like UPS QV).
+
+| Attribute | Value |
+|-----------|-------|
+| **Webhook URL** | `https://package-confirmation-app.vercel.app/api/webhooks/fedex` |
+| **Auth** | FedEx validates callback URL ownership |
+| **Storage** | Vercel Blob (`fedex-events/*.json`) |
+| **Status** | ⚠️ **Not yet activated** - requires FedEx Developer Portal setup |
+
+#### How to Activate FedEx AIV
+
+1. **Go to FedEx Developer Portal**
+   - URL: https://developer.fedex.com
+   - Login with your FedEx credentials
+
+2. **Create/Select Organization**
+   - Add your FedEx shipping account numbers
+   - Complete business verification if required
+
+3. **Create API Project**
+   - Click "Create a Project"
+   - Enable these APIs:
+     - ✅ Track API
+     - ✅ FedEx Advanced Integrated Visibility
+
+4. **Configure Webhook**
+   - Go to project settings → Webhooks
+   - Register callback URL: `https://package-confirmation-app.vercel.app/api/webhooks/fedex`
+   - FedEx will send a validation request
+
+5. **Select Event Types**
+   - ✅ PICKUP - Package picked up
+   - ✅ IN_TRANSIT - Package in transit
+   - ✅ OUT_FOR_DELIVERY - Package out for delivery
+   - ✅ DELIVERED - Package delivered
+   - ✅ EXCEPTION - Delay or exception occurred
+
+6. **Subscribe Account Numbers**
+   - Select which FedEx accounts should trigger events
+   - Enable for inbound shipments (packages TO your address)
+
+#### Webhook Payload Example (from FedEx)
+
+```json
+{
+  "eventType": "TRACKING_UPDATE",
+  "trackingInfo": {
+    "trackingNumber": "794644790045",
+    "trackingNumberUniqueId": "12345",
+    "latestStatusDetail": {
+      "code": "IT",
+      "statusByLocale": "In Transit",
+      "description": "Package in transit"
+    },
+    "scanEvents": [{
+      "date": "2025-11-30T10:30:00",
+      "eventType": "IT",
+      "eventDescription": "In transit",
+      "scanLocation": {
+        "city": "MEMPHIS",
+        "stateOrProvinceCode": "TN"
+      }
+    }]
+  }
+}
+```
+
+#### Testing Webhook
+
+```bash
+# Check webhook status
+curl "https://package-confirmation-app.vercel.app/api/webhooks/fedex?action=status"
+
+# View received events
+curl "https://package-confirmation-app.vercel.app/api/webhooks/fedex?action=events"
+```
+
+#### Cost Considerations
+
+| Tier | Cost | Events/Day | Notes |
+|------|------|------------|-------|
+| Free | $0 | Limited | Basic tracking only |
+| Standard | ~$50/mo | 10,000 | Includes AIV |
+| Enterprise | Contact | Unlimited | Full visibility |
+
+**Note:** AIV may require a paid FedEx Developer subscription. Contact FedEx sales for pricing.
+
+---
+
 ### 3. Vercel Blob Storage
 
 **Purpose:** Persistent storage for manifests and tracking index.
