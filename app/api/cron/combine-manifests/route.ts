@@ -390,7 +390,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     endpoint: 'Combine Manifests Cron',
     description: 'Combines daily S&S and Sanmar manifest files into combined files',
-    schedule: 'Every 15 minutes',
+    schedule: 'Every 6 hours (backup - also triggered on email webhook)',
     method: 'POST with Authorization: Bearer <CRON_SECRET>',
     outputs: ['manifests/ss_combined.xlsx', 'manifests/sanmar_combined.xlsx']
   });
