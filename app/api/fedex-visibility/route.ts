@@ -17,6 +17,99 @@ export const maxDuration = 60; // Allow up to 60 seconds for processing
 let trackingNumbersCache: { numbers: string[]; timestamp: number } | null = null;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+// Warehouse locations for inbound detection
+const WAREHOUSE_LOCATIONS = [
+  { city: 'DALLAS', zip: '75234' },
+  { city: 'DALLAS', zip: '75247' },
+  { city: 'FARMERS BRANCH', zip: '75234' }
+];
+
+interface WebhookShipment {
+  trackingNumber: string;
+  status: string;
+  statusDescription: string;
+  direction: 'inbound' | 'outbound';
+  shipperName?: string;
+  recipientName?: string;
+  location?: string;
+  timestamp?: string;
+  isException: boolean;
+  scheduledDelivery?: string;
+  actualDelivery?: string;
+}
+
+/**
+ * Get shipments from stored webhook events (from FedEx AIV)
+ * This is the PRIMARY source once AIV is activated
+ */
+async function getShipmentsFromWebhookEvents(): Promise<{
+  shipments: WebhookShipment[];
+  eventCount: number;
+  source: 'webhook';
+}> {
+  const { blobs } = await list({ prefix: 'fedex-events/' });
+  
+  if (blobs.length === 0) {
+    return { shipments: [], eventCount: 0, source: 'webhook' };
+  }
+  
+  // Group events by tracking number (keep latest status)
+  const shipmentMap = new Map<string, WebhookShipment>();
+  
+  // Sort by name (timestamp) descending to process newest first
+  const sortedBlobs = blobs.sort((a, b) => b.pathname.localeCompare(a.pathname));
+  
+  // Only process recent events (last 500)
+  for (const blob of sortedBlobs.slice(0, 500)) {
+    try {
+      const response = await fetch(blob.url);
+      if (!response.ok) continue;
+      
+      const event = await response.json();
+      const trackingNumber = event.trackingNumber;
+      
+      if (!trackingNumber || shipmentMap.has(trackingNumber)) continue;
+      
+      // Determine direction based on recipient location
+      const recipientCity = (event.rawPayload?.recipientInformation?.address?.city || '').toUpperCase();
+      const recipientZip = event.rawPayload?.recipientInformation?.address?.postalCode || '';
+      
+      const isInbound = WAREHOUSE_LOCATIONS.some(loc => 
+        recipientCity.includes(loc.city) && recipientZip.startsWith(loc.zip.substring(0, 3))
+      );
+      
+      const isException = 
+        event.status?.includes('EXCEPTION') || 
+        event.status?.includes('DE') ||
+        event.statusDescription?.toLowerCase().includes('exception') ||
+        event.statusDescription?.toLowerCase().includes('delay');
+      
+      shipmentMap.set(trackingNumber, {
+        trackingNumber,
+        status: event.status || 'UNKNOWN',
+        statusDescription: event.statusDescription || event.eventType || 'Unknown',
+        direction: isInbound ? 'inbound' : 'outbound',
+        shipperName: event.rawPayload?.shipperInformation?.contact?.companyName,
+        recipientName: event.rawPayload?.recipientInformation?.contact?.companyName,
+        location: event.location,
+        timestamp: event.timestamp || event.receivedAt,
+        isException,
+        scheduledDelivery: event.rawPayload?.dateAndTimes?.find((d: any) => d.type === 'ESTIMATED_DELIVERY')?.dateTime?.split('T')[0],
+        actualDelivery: event.rawPayload?.dateAndTimes?.find((d: any) => d.type === 'ACTUAL_DELIVERY')?.dateTime?.split('T')[0]
+      });
+      
+    } catch (e) {
+      console.error(`Error reading event ${blob.pathname}:`, e);
+    }
+  }
+  
+  return {
+    shipments: Array.from(shipmentMap.values()),
+    eventCount: blobs.length,
+    source: 'webhook'
+  };
+}
+
 /**
  * Get FedEx tracking numbers from our manifests
  * Sanmar primarily uses FedEx Ground
@@ -127,6 +220,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get('action');
   const limit = parseInt(searchParams.get('limit') || '100');
+  const forcePolling = searchParams.get('forcePolling') === 'true';
 
   try {
     // Check configuration
@@ -139,21 +233,54 @@ export async function GET(request: Request) {
       }, { status: 500 });
     }
 
+    // Try to get data from webhook events first (AIV)
+    const webhookData = await getShipmentsFromWebhookEvents();
+    const hasWebhookData = webhookData.shipments.length > 0;
+
     switch (action) {
       case 'status': {
-        // Get tracking numbers count
+        // Get tracking numbers count from manifests
         const trackingNumbers = await getFedExTrackingNumbersFromManifests();
+        
         return NextResponse.json({
           status: 'ready',
           ...config,
-          trackingNumbersAvailable: trackingNumbers.length,
-          message: 'FedEx Visibility is configured and ready',
-          note: 'Using polling-based visibility (Track API). For real-time updates, set up FedEx AIV webhook.'
+          dataSource: hasWebhookData ? 'webhook (AIV)' : 'polling (Track API)',
+          webhookEventsReceived: webhookData.eventCount,
+          webhookShipmentsTracked: webhookData.shipments.length,
+          manifestTrackingNumbers: trackingNumbers.length,
+          message: hasWebhookData 
+            ? `FedEx AIV active - ${webhookData.shipments.length} shipments from webhook events`
+            : 'FedEx AIV not active - using polling mode with manifest tracking numbers',
+          aivSetupRequired: !hasWebhookData,
+          setupUrl: !hasWebhookData ? '/api/fedex-subscription' : undefined
         });
       }
 
       case 'all': {
-        // Get all FedEx visibility data
+        // Prefer webhook data if available
+        if (hasWebhookData && !forcePolling) {
+          const inbound = webhookData.shipments.filter(s => s.direction === 'inbound');
+          const outbound = webhookData.shipments.filter(s => s.direction === 'outbound');
+          
+          return NextResponse.json({
+            success: true,
+            source: 'webhook',
+            aivActive: true,
+            totalEvents: webhookData.eventCount,
+            total: webhookData.shipments.length,
+            inbound: {
+              count: inbound.length,
+              shipments: inbound
+            },
+            outbound: {
+              count: outbound.length,
+              shipments: outbound
+            }
+          });
+        }
+        
+        // Fall back to polling
         const trackingNumbers = await getFedExTrackingNumbersFromManifests();
         const limitedNumbers = trackingNumbers.slice(0, limit);
         
@@ -164,6 +291,8 @@ export async function GET(request: Request) {
         return NextResponse.json({
           success: true,
           source: 'polling',
+          aivActive: false,
+          note: 'To see all account shipments, set up FedEx AIV at /api/fedex-subscription',
           trackingNumbersQueried: limitedNumbers.length,
           trackingNumbersTotal: trackingNumbers.length,
           total: allShipments.length,
@@ -179,7 +308,16 @@ export async function GET(request: Request) {
       }
 
       case 'inbound': {
-        // Get inbound shipments only
+        if (hasWebhookData && !forcePolling) {
+          const inbound = webhookData.shipments.filter(s => s.direction === 'inbound');
+          return NextResponse.json({
+            success: true,
+            source: 'webhook',
+            count: inbound.length,
+            shipments: inbound
+          });
+        }
+        
         const trackingNumbers = await getFedExTrackingNumbersFromManifests();
         const limitedNumbers = trackingNumbers.slice(0, limit);
         
@@ -195,7 +333,16 @@ export async function GET(request: Request) {
       }
 
       case 'outbound': {
-        // Get outbound shipments only
+        if (hasWebhookData && !forcePolling) {
+          const outbound = webhookData.shipments.filter(s => s.direction === 'outbound');
+          return NextResponse.json({
+            success: true,
+            source: 'webhook',
+            count: outbound.length,
+            shipments: outbound
+          });
+        }
+        
         const trackingNumbers = await getFedExTrackingNumbersFromManifests();
         const limitedNumbers = trackingNumbers.slice(0, limit);
         
